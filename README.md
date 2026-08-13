@@ -1,17 +1,17 @@
-# TypedJS
+# Fractum
 
-TypedJS is a source-to-source compiler for a statically typed JavaScript-like language featuring Hindley-Milner (HM) type inference, implemented in Haskell. It parses TypedJS source code, performs static type checking, and lowers the typed abstract syntax tree (AST) into clean, readable JavaScript output.
+Fractum is a source-to-source compiler for a statically typed JavaScript-like language featuring Hindley-Milner (HM) type inference, implemented in Haskell. It parses Fractum source code, performs static type checking, and lowers the typed abstract syntax tree (AST) into clean, readable JavaScript output.
 
 ## Motivation
 
-JavaScript is expressive, but its dynamic typing can shift certain bugs from compile-time to runtime. TypedJS explores an alternative design space:
+JavaScript is expressive, but its dynamic typing can shift certain bugs from compile-time to runtime. Fractum explores an alternative design space:
 
 *   **Familiar syntax**: A JavaScript-like syntax to lower the learning curve.
 *   **Strong static typing**: Catches type-related errors before the code is executed.
 *   **HM type inference**: Reduces the burden of explicit type annotations while maintaining strong guarantees.
 *   **Readable generation**: Outputs idiomatic JavaScript that is easy to debug and deploy.
 
-TypedJS is intended for experimentation, education, and as a foundation for advanced language tooling.
+Fractum is intended for experimentation, education, and as a foundation for advanced language tooling.
 
 ## Getting Started
 
@@ -37,12 +37,12 @@ cabal install all --installdir=$HOME/.local/bin --overwrite-policy=always
 ### Running the Compiler
 
 ```bash
-typedjsc --help
-TypeJs - type-safe Javascript dialect
+fractumc --help
+Fractum - type-safe Javascript dialect
 
-Usage: typedjsc SOURCE_FILES... [-O|--opt] [-o|--output ARG] [--color ARG]
+Usage: fractumc SOURCE_FILES... [-O|--opt] [-o|--output ARG] [--color ARG]
 
-  Compile TypeJs files to readable javascript
+  Compile Fractum files to readable javascript
 
 Available options:
   SOURCE_FILES...          Source file to process
@@ -88,7 +88,7 @@ let inc = (n: Int): Int => n + 1;
 
 ### Polymorphism and Higher-Order Functions
 
-TypedJS supports let-polymorphism, enabling reusable generic functions.
+Fractum supports let-polymorphism, enabling reusable generic functions.
 
 ```typescript
 let id = (x) => x;
@@ -223,7 +223,7 @@ if (b > 5) {
 
 ## Diagnostics and Error Reporting
 
-TypedJS features a detailed diagnostic engine. Below is a catalog of currently implemented error codes:
+Fractum features a detailed diagnostic engine. Below is a catalog of currently implemented error codes:
 
 | Code  | Kind                | Example Message                                        |
 | :---- | :------------------ | :----------------------------------------------------- |
