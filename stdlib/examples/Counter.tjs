@@ -1,0 +1,109 @@
+// ==========================================
+// Counter.tjs
+// Example: A complete counter app using the Elm Architecture
+// ==========================================
+//
+// This demonstrates all three components working together:
+//   1. Html<Msg> for building the UI (Component 1)
+//   2. Cmd<Msg> for side effects (Component 2)
+//   3. The runtime's Model-View-Update loop (Component 3)
+
+// -- Model --
+
+type Model = { count: Int, label: String };
+
+// -- Messages --
+
+enum Msg {
+    Increment,
+    Decrement,
+    Reset,
+    SetLabel(String),
+    DelayedIncrement,
+    IncrementAfterDelay,
+}
+
+// -- Init --
+// Returns [model, cmd] — a two-element array since there are no tuples.
+
+function init(): [Model, Cmd<Msg>] {
+    return [{ count: 0, label: "Counter" }, Cmd::CmdNone];
+}
+
+// -- Update --
+// Pure function: takes a message and current model, returns new model + command.
+// No side effects happen here — Cmd values are descriptions, not actions.
+
+function update(msg: Msg, model: Model): [Model, Cmd<Msg>] {
+    return match (msg) {
+        Msg::Increment => [
+            { count: model.count + 1, label: model.label },
+            Cmd::CmdNone,
+        ],
+        Msg::Decrement => [
+            { count: model.count - 1, label: model.label },
+            Cmd::CmdNone,
+        ],
+        Msg::Reset => [
+            { count: 0, label: model.label },
+            Cmd::CmdNone,
+        ],
+        Msg::SetLabel(newLabel) => [
+            { count: model.count, label: newLabel },
+            Cmd::CmdNone,
+        ],
+        Msg::DelayedIncrement => [
+            model,
+            Cmd::Delay(1000, Msg::IncrementAfterDelay),
+        ],
+        Msg::IncrementAfterDelay => [
+            { count: model.count + 1, label: model.label },
+            Cmd::ConsoleLog("Delayed increment complete!"),
+        ],
+    };
+}
+
+// -- View --
+// Pure function: model → virtual DOM tree. No mutation, no side effects.
+
+function view(model: Model): Html<Msg> {
+    return div([Attribute::Class("app-container")], [
+        h1([], [text(model.label)]),
+
+        div([Attribute::Class("counter-display")], [
+            span([Attribute::Class("count")], [text(toString(model.count))]),
+        ]),
+
+        div([Attribute::Class("button-group")], [
+            button(
+                [Attribute::OnClick(Msg::Decrement), Attribute::Class("btn btn-minus")],
+                [text("-")]
+            ),
+            button(
+                [Attribute::OnClick(Msg::Reset), Attribute::Class("btn btn-reset")],
+                [text("Reset")]
+            ),
+            button(
+                [Attribute::OnClick(Msg::Increment), Attribute::Class("btn btn-plus")],
+                [text("+")]
+            ),
+        ]),
+
+        div([Attribute::Class("delay-section")], [
+            button(
+                [Attribute::OnClick(Msg::DelayedIncrement), Attribute::Class("btn btn-delay")],
+                [text("Increment after 1s")]
+            ),
+        ]),
+
+        div([Attribute::Class("label-section")], [
+            label([], [text("Label: ")]),
+            input([
+                Attribute::Type("text"),
+                Attribute::Value(model.label),
+                Attribute::OnInput((s) => Msg::SetLabel(s)),
+                Attribute::Placeholder("Enter a label..."),
+            ]),
+        ]),
+    ]);
+}

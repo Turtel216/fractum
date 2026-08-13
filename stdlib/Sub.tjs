@@ -1,0 +1,31 @@
+// ==========================================
+// Sub.tjs
+// Subscription System
+// ==========================================
+//
+// Subscriptions allow the application to listen to external events, such as
+// time intervals, animation frames, or global window events. The runtime
+// manages the actual event listeners and routes them back as Messages.
+
+enum Sub<Msg> {
+    SubNone,
+    SubBatch([Sub<Msg>]),
+    OnAnimationFrame((Float) -> Msg),      // timestamp mapper
+    OnWindowResize((Int) -> (Int) -> Msg), // width -> height -> Msg (curried since no tuples)
+    OnKeyPress((Int) -> Msg),              // keyCode mapper
+    Every(Int, (Float) -> Msg),            // interval ms, timestamp mapper
+}
+
+// ---------------------------------------------------------
+// Helper Functions
+// ---------------------------------------------------------
+
+// Returns a subscription that does nothing. Useful when no active subscriptions are needed.
+function sub_none<Msg>(): Sub<Msg> {
+    return Sub::SubNone;
+}
+
+// Combines multiple subscriptions into a single batched subscription.
+function sub_batch<Msg>(subs: [Sub<Msg>]): Sub<Msg> {
+    return Sub::SubBatch(subs);
+}

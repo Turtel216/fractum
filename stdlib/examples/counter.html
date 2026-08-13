@@ -1,0 +1,344 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TypedJS Counter — Runtime Demo</title>
+  <style>
+    *, *::before, *::after {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+      background: #0f0f1a;
+      color: #e0e0e8;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .app-container {
+      background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+      border: 1px solid rgba(255, 255, 255, 0.06);
+      border-radius: 20px;
+      padding: 48px 40px;
+      max-width: 420px;
+      width: 100%;
+      text-align: center;
+      box-shadow:
+        0 25px 50px rgba(0, 0, 0, 0.5),
+        0 0 0 1px rgba(255, 255, 255, 0.03);
+    }
+
+    h1 {
+      font-size: 1.4rem;
+      font-weight: 500;
+      letter-spacing: 0.05em;
+      color: #a0a0c0;
+      margin-bottom: 32px;
+      text-transform: uppercase;
+    }
+
+    .counter-display {
+      margin-bottom: 36px;
+    }
+
+    .count {
+      font-size: 5rem;
+      font-weight: 700;
+      background: linear-gradient(135deg, #667eea, #764ba2);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+      line-height: 1.1;
+      display: inline-block;
+      transition: transform 0.15s ease;
+    }
+
+    .button-group {
+      display: flex;
+      gap: 12px;
+      justify-content: center;
+      margin-bottom: 24px;
+    }
+
+    .btn {
+      border: none;
+      border-radius: 12px;
+      padding: 14px 28px;
+      font-size: 1.1rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      outline: none;
+    }
+
+    .btn:active {
+      transform: scale(0.95);
+    }
+
+    .btn-minus {
+      background: linear-gradient(135deg, #ff6b6b, #ee5a24);
+      color: white;
+    }
+    .btn-minus:hover {
+      box-shadow: 0 6px 20px rgba(238, 90, 36, 0.4);
+      transform: translateY(-2px);
+    }
+
+    .btn-reset {
+      background: rgba(255, 255, 255, 0.08);
+      color: #a0a0c0;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+    }
+    .btn-reset:hover {
+      background: rgba(255, 255, 255, 0.12);
+      color: #e0e0e8;
+      transform: translateY(-2px);
+    }
+
+    .btn-plus {
+      background: linear-gradient(135deg, #48c6ef, #6f86d6);
+      color: white;
+    }
+    .btn-plus:hover {
+      box-shadow: 0 6px 20px rgba(111, 134, 214, 0.4);
+      transform: translateY(-2px);
+    }
+
+    .delay-section {
+      margin-bottom: 28px;
+    }
+
+    .btn-delay {
+      background: linear-gradient(135deg, #a18cd1, #fbc2eb);
+      color: #1a1a2e;
+      width: 100%;
+    }
+    .btn-delay:hover {
+      box-shadow: 0 6px 20px rgba(161, 140, 209, 0.4);
+      transform: translateY(-2px);
+    }
+
+    .label-section {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .label-section label {
+      font-size: 0.9rem;
+      color: #a0a0c0;
+      white-space: nowrap;
+    }
+
+    .label-section input {
+      flex: 1;
+      background: rgba(255, 255, 255, 0.06);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 10px;
+      padding: 10px 14px;
+      font-size: 0.95rem;
+      color: #e0e0e8;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+
+    .label-section input:focus {
+      border-color: #667eea;
+      box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.15);
+    }
+
+    .label-section input::placeholder {
+      color: rgba(160, 160, 192, 0.5);
+    }
+  </style>
+</head>
+<body>
+
+<div id="app"></div>
+
+<!-- TypedJS Runtime -->
+<script src="../../runtime/typedjs_runtime.js"></script>
+
+<!-- Hand-compiled Counter Application -->
+<script>
+  'use strict';
+
+  // ============================================================
+  // This is the HAND-COMPILED output of Counter.tjs.
+  // It shows exactly what the typedjsc compiler would produce.
+  // ============================================================
+
+  // -- Init --
+  function init() {
+    return [
+      { count: 0, label: "Counter" },           // model
+      { _tag: "CmdNone" }                        // cmd
+    ];
+  }
+
+  // -- Update --
+  function update(msg, model) {
+    return (() => {
+      const _m = msg;
+
+      if (_m._tag === "Increment") {
+        return [
+          { count: model.count + 1, label: model.label },
+          { _tag: "CmdNone" }
+        ];
+      }
+
+      if (_m._tag === "Decrement") {
+        return [
+          { count: model.count - 1, label: model.label },
+          { _tag: "CmdNone" }
+        ];
+      }
+
+      if (_m._tag === "Reset") {
+        return [
+          { count: 0, label: model.label },
+          { _tag: "CmdNone" }
+        ];
+      }
+
+      if (_m._tag === "SetLabel") {
+        const newLabel = _m._0;
+        return [
+          { count: model.count, label: newLabel },
+          { _tag: "CmdNone" }
+        ];
+      }
+
+      if (_m._tag === "DelayedIncrement") {
+        return [
+          model,
+          { _tag: "Delay", _0: 1000, _1: { _tag: "IncrementAfterDelay" } }
+        ];
+      }
+
+      if (_m._tag === "IncrementAfterDelay") {
+        return [
+          { count: model.count + 1, label: model.label },
+          { _tag: "ConsoleLog", _0: "Delayed increment complete!" }
+        ];
+      }
+    })();
+  }
+
+  // -- View --
+  function view(model) {
+    return {
+      _tag: "Node", _0: "div",
+      _1: [{ _tag: "Class", _0: "app-container" }],
+      _2: [
+        // h1 with label
+        {
+          _tag: "Node", _0: "h1",
+          _1: [],
+          _2: [{ _tag: "Text", _0: model.label }]
+        },
+
+        // Counter display
+        {
+          _tag: "Node", _0: "div",
+          _1: [{ _tag: "Class", _0: "counter-display" }],
+          _2: [{
+            _tag: "Node", _0: "span",
+            _1: [{ _tag: "Class", _0: "count" }],
+            _2: [{ _tag: "Text", _0: String(model.count) }]
+          }]
+        },
+
+        // Button group: -, Reset, +
+        {
+          _tag: "Node", _0: "div",
+          _1: [{ _tag: "Class", _0: "button-group" }],
+          _2: [
+            {
+              _tag: "Node", _0: "button",
+              _1: [
+                { _tag: "OnClick", _0: { _tag: "Decrement" } },
+                { _tag: "Class", _0: "btn btn-minus" }
+              ],
+              _2: [{ _tag: "Text", _0: "-" }]
+            },
+            {
+              _tag: "Node", _0: "button",
+              _1: [
+                { _tag: "OnClick", _0: { _tag: "Reset" } },
+                { _tag: "Class", _0: "btn btn-reset" }
+              ],
+              _2: [{ _tag: "Text", _0: "Reset" }]
+            },
+            {
+              _tag: "Node", _0: "button",
+              _1: [
+                { _tag: "OnClick", _0: { _tag: "Increment" } },
+                { _tag: "Class", _0: "btn btn-plus" }
+              ],
+              _2: [{ _tag: "Text", _0: "+" }]
+            },
+          ]
+        },
+
+        // Delayed increment
+        {
+          _tag: "Node", _0: "div",
+          _1: [{ _tag: "Class", _0: "delay-section" }],
+          _2: [{
+            _tag: "Node", _0: "button",
+            _1: [
+              { _tag: "OnClick", _0: { _tag: "DelayedIncrement" } },
+              { _tag: "Class", _0: "btn btn-delay" }
+            ],
+            _2: [{ _tag: "Text", _0: "Increment after 1s" }]
+          }]
+        },
+
+        // Label input
+        {
+          _tag: "Node", _0: "div",
+          _1: [{ _tag: "Class", _0: "label-section" }],
+          _2: [
+            {
+              _tag: "Node", _0: "label",
+              _1: [],
+              _2: [{ _tag: "Text", _0: "Label: " }]
+            },
+            {
+              _tag: "Node", _0: "input",
+              _1: [
+                { _tag: "Type", _0: "text" },
+                { _tag: "Value", _0: model.label },
+                // OnInput: the sanitization boundary extracts e.target.value
+                // and passes it to this mapper function. The raw Event object
+                // is NEVER exposed to the application code.
+                { _tag: "OnInput", _0: (s) => ({ _tag: "SetLabel", _0: s }) },
+                { _tag: "Placeholder", _0: "Enter a label..." },
+              ],
+              _2: []
+            },
+          ]
+        },
+      ]
+    };
+  }
+
+  // -- Start the Application --
+  TypedJS.app({
+    init:   init,
+    update: update,
+    view:   view,
+    root:   'app',
+  });
+</script>
+
+</body>
+</html>
