@@ -3,10 +3,12 @@
 // Strict DOM Query Boundary
 // ==========================================
 //
-// These functions provide a strict boundary for querying the actual DOM.
-// They return Option values to guarantee safety (no null or undefined).
-// NOTE: These are implemented in the JS runtime. The signatures here serve
-// as specifications and type definitions for the application code.
+// These types define the strict boundary for querying the actual DOM.
+// All query functions return Option values to guarantee safety (no null or undefined).
+//
+// NOTE: The actual implementations live in the JS runtime (TypedJS.dom).
+// These type definitions serve as specifications for the application code.
+// When a module system is added, these will become real importable types.
 
 // Opaque type — user cannot construct or pattern match on this
 type DomElement = { _opaque: Bool };
@@ -16,29 +18,8 @@ enum DomError {
     InvalidSelector(String),
 }
 
-// All DOM queries return Option — never null, never undefined.
-// The runtime provides the actual implementation.
-
-// Retrieves an element by its ID.
-function get_element_by_id(id: String): Option<DomElement> {
-    // Implemented in JS runtime
-    // return Option::None;
-}
-
-// Retrieves the first element matching a CSS selector.
-function query_selector(selector: String): Option<DomElement> {
-    // Implemented in JS runtime
-    // return Option::None;
-}
-
-// Retrieves the value of a specific attribute on an element safely.
-function get_attribute(el: DomElement, name: String): Option<String> {
-    // Implemented in JS runtime
-    // return Option::None;
-}
-
-// Retrieves the text content of a given element.
-function get_text_content(el: DomElement): Option<String> {
-    // Implemented in JS runtime
-    // return Option::None;
-}
+// Runtime-provided functions (not yet compilable as TypedJS):
+//   get_element_by_id(id: String) -> Option<DomElement>
+//   query_selector(selector: String) -> Option<DomElement>
+//   get_attribute(el: DomElement, name: String) -> Option<String>
+//   get_text_content(el: DomElement) -> Option<String>

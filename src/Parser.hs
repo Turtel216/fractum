@@ -1,52 +1,51 @@
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedStrings #-}
 
-{-|
-Module      : Parser
-Description : Megaparsec-based syntactic analysis and AST generation for TypedJs.
-Stability   : experimental
-
-This module implements a unified lexer and parser for the "TypedJs" surface language 
-using the @megaparsec@ library. It translates raw source text into a highly localized 
-surface AST ('Program', 'LExpr', 'LStmt'), tracking source spans to 
-feed the semantic analyzers error reporting.
-
-== Architecture Overview
-
-* __Lexical Analysis:__ 
-    Lexing and parsing are interleaved. Whitespace and comments are consumed 
-    automatically *after* every token using the space consumer ('sc') and 'lexeme' 
-    wrappers. This means parsers typically expect no leading whitespace but will 
-    consume trailing whitespace.
-
-* __Precise Span Tracking ('Located'):__
-    AST nodes are aggresively wrapped in 'Located' via the 'withSpan' combinator. 
-    Because trailing whitespace is consumed by 'lexeme', the end positions recorded 
-    by 'getSourcePos' may slightly overshoot the literal token boundary, but the 
-    start bounds are strictly precise. 
-
-* __Operator Precedence & Associativity:__
-    Instead of using @makeExprParser@, operator precedence is encoded structurally 
-    via layered parser combinators ('pAssign' -> 'pLogicOr' -> 'pAdditive', etc.). 
-    This manual stratification allows a custom 'chainl1' to correctly capture and 
-    merge the source spans of the LHS and RHS into a unified 'LExpr' bound.
-
-* __Left-Recursion via Postfix Chains:__
-    Function calls, member access (@.foo@), and array indexing (@[i]@) are handled 
-    by 'pPostfix'. It evaluates a base 'pPrimary' expression and then iteratively 
-    consumes postfix operations, continually expanding the 'Span' from the original 
-    base expression to the end of the most recently consumed postfix token.
-
-* __Type Syntax:__
-    The parser natively supports type annotations, generic instantiations ('TApp'), 
-    record shapes ('TObject'), array types, and structural function types.
-
-== Entry Points
-
-* 'parseProgram': The primary entry point. Consumes the entire input stream, 
-    enforces 'eof', and maps Megaparsec's error bundle into a standard 'String' 
-    on failure.
--}
+-- |
+-- Module      : Parser
+-- Description : Megaparsec-based syntactic analysis and AST generation for TypedJs.
+-- Stability   : experimental
+--
+-- This module implements a unified lexer and parser for the "TypedJs" surface language
+-- using the @megaparsec@ library. It translates raw source text into a highly localized
+-- surface AST ('Program', 'LExpr', 'LStmt'), tracking source spans to
+-- feed the semantic analyzers error reporting.
+--
+-- == Architecture Overview
+--
+-- * __Lexical Analysis:__
+--     Lexing and parsing are interleaved. Whitespace and comments are consumed
+--     automatically *after* every token using the space consumer ('sc') and 'lexeme'
+--     wrappers. This means parsers typically expect no leading whitespace but will
+--     consume trailing whitespace.
+--
+-- * __Precise Span Tracking ('Located'):__
+--     AST nodes are aggresively wrapped in 'Located' via the 'withSpan' combinator.
+--     Because trailing whitespace is consumed by 'lexeme', the end positions recorded
+--     by 'getSourcePos' may slightly overshoot the literal token boundary, but the
+--     start bounds are strictly precise.
+--
+-- * __Operator Precedence & Associativity:__
+--     Instead of using @makeExprParser@, operator precedence is encoded structurally
+--     via layered parser combinators ('pAssign' -> 'pLogicOr' -> 'pAdditive', etc.).
+--     This manual stratification allows a custom 'chainl1' to correctly capture and
+--     merge the source spans of the LHS and RHS into a unified 'LExpr' bound.
+--
+-- * __Left-Recursion via Postfix Chains:__
+--     Function calls, member access (@.foo@), and array indexing (@[i]@) are handled
+--     by 'pPostfix'. It evaluates a base 'pPrimary' expression and then iteratively
+--     consumes postfix operations, continually expanding the 'Span' from the original
+--     base expression to the end of the most recently consumed postfix token.
+--
+-- * __Type Syntax:__
+--     The parser natively supports type annotations, generic instantiations ('TApp'),
+--     record shapes ('TObject'), array types, and structural function types.
+--
+-- == Entry Points
+--
+-- * 'parseProgram': The primary entry point. Consumes the entire input stream,
+--     enforces 'eof', and maps Megaparsec's error bundle into a standard 'String'
+--     on failure.
 module Parser where
 
 import Ast
@@ -278,10 +277,13 @@ pFunDecl :: Parser Stmt
 pFunDecl = do
   rword "function"
   n <- identifier
+  tyParams <- MP.option [] (angles (identifier `sepBy1` comma))
   params <- parens (pParam `sepBy` comma)
   retTy <- optional (colon *> pType)
   b <- pBlock
-  pure (SFun n params retTy b)
+  pure (SFun n tyParams params retTy b)
+  where
+    angles = between (symbol "<") (symbol ">")
 
 -- | Parse return statement
 pReturn :: Parser Stmt
@@ -537,11 +539,11 @@ pLiteral =
 
 -- | Parse Arrays (returns raw Expr)
 pArrayRaw :: Parser Expr
-pArrayRaw = EArray <$> brackets (pExpr `sepBy` comma)
+pArrayRaw = EArray <$> brackets (pExpr `MP.sepEndBy` comma)
 
 -- | Parse Objects (returns raw Expr)
 pObjectRaw :: Parser Expr
-pObjectRaw = EObject <$> braces (pField `sepBy` comma)
+pObjectRaw = EObject <$> braces (pField `MP.sepEndBy` comma)
   where
     pField = do
       k <- identifier <|> stringLit

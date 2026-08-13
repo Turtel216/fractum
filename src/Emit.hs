@@ -67,7 +67,10 @@ ppExpr :: Int -> J.JSExpr -> Text
 ppExpr ctx = \case
   -- Special case for prelude print function which maps to Js's console.log
   J.JSVar "print" -> "console.log"
-  
+
+  -- Special case for prelude toString function which maps to Js's String constructor
+  J.JSVar "toString" -> "String"
+
   J.JSVar x -> x
   
   J.JSLiteral l -> ppLit l

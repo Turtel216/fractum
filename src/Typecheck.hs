@@ -205,13 +205,14 @@ data InferState = InferState
   , typeDecls   :: TypeDeclEnv
   , enumDecls   :: EnumDeclEnv
   , currentSpan :: Maybe Span    -- ^ span of the AST node currently being analysed
+  , tyVarBinds  :: M.Map Name IType  -- ^ explicit type variable bindings (from generic functions)
   }
 
 newtype Infer a = Infer {unInfer :: ExceptT TypeError (State InferState) a}
   deriving (Functor, Applicative, Monad, MonadError TypeError, MonadState InferState)
 
 runInfer :: Infer a -> Either TypeError a
-runInfer m = evalState (runExceptT (unInfer m)) (InferState 0 M.empty M.empty Nothing)
+runInfer m = evalState (runExceptT (unInfer m)) (InferState 0 M.empty M.empty Nothing M.empty)
 
 fresh :: Infer IType
 fresh = do
@@ -309,23 +310,28 @@ fromSurfaceType = \case
     where
       go (k, v) = (k,) <$> fromSurfaceType v
   TApp n args -> do
-    decls <- gets typeDecls
-    enums <- gets enumDecls
-    case M.lookup n decls of
-      Just (params, body)
-        | length params /= length args ->
-            throwSpanned (TypeArityMismatch n (length params) (length args)) []
-        | otherwise -> do
-            let substMap = M.fromList (zip params args)
-                expanded = substSurfaceType substMap body
-            fromSurfaceType expanded
-      Nothing -> case M.lookup n enums of
-        Just (params, _)
-          | length params /= length args ->
-              throwSpanned (TypeArityMismatch n (length params) (length args)) []
-          | otherwise ->
-              TCon n <$> mapM fromSurfaceType args
-        Nothing -> throwSpanned (UnboundType n) []
+    -- Check explicit type variable bindings first (from generic function decls)
+    binds <- gets tyVarBinds
+    case M.lookup n binds of
+      Just itype | null args -> pure itype  -- return pre-allocated TV
+      _ -> do
+        decls <- gets typeDecls
+        enums <- gets enumDecls
+        case M.lookup n decls of
+          Just (params, body)
+            | length params /= length args ->
+                throwSpanned (TypeArityMismatch n (length params) (length args)) []
+            | otherwise -> do
+                let substMap = M.fromList (zip params args)
+                    expanded = substSurfaceType substMap body
+                fromSurfaceType expanded
+          Nothing -> case M.lookup n enums of
+            Just (params, _)
+              | length params /= length args ->
+                  throwSpanned (TypeArityMismatch n (length params) (length args)) []
+              | otherwise ->
+                  TCon n <$> mapM fromSurfaceType args
+            Nothing -> throwSpanned (UnboundType n) []
   TFun as r -> TFunT <$> mapM fromSurfaceType as <*> fromSurfaceType r
 
 -- | Convert an internal type back to a surface Type for use in
@@ -471,7 +477,7 @@ inferExpr env (Located sp expr) = withCurrentSpan sp $ case expr of
     (s2, tb) <- inferExpr (apply s1 env) b
     let s12 = compose s2 s1
     case op of
-      Add -> numNum ta tb s12 TIntT
+      Add -> addOp ta tb s12
       Sub -> numNum ta tb s12 TIntT
       Mul -> numNum ta tb s12 TIntT
       Div -> numNum ta tb s12 TIntT
@@ -490,6 +496,20 @@ inferExpr env (Located sp expr) = withCurrentSpan sp $ case expr of
         sB <- unify (apply sA (apply s tb)) TIntT
         let sAll = compose sB (compose sA s)
         pure (sAll, ret)
+
+      -- | The '+' operator supports both Int + Int -> Int and String + String -> String.
+      -- If either operand is known to be a String, unify both as String.
+      addOp ta tb s = do
+        let ta' = apply s ta
+            tb' = apply s tb
+        case (ta', tb') of
+          (TStringT, _) -> do
+            sB <- unify (apply s tb) TStringT
+            pure (compose sB s, TStringT)
+          (_, TStringT) -> do
+            sA <- unify (apply s ta) TStringT
+            pure (compose sA s, TStringT)
+          _ -> numNum ta tb s TIntT
 
       boolBool ta tb s = do
         sA <- unify (apply s ta) TBoolT
@@ -688,7 +708,15 @@ inferStmt env (Located sp stmt) = withCurrentSpan sp $ case stmt of
       ) env variants
     pure (emptySubst, envOut)
 
-  SFun name params mRet body -> do
+  SFun name tyParams params mRet body -> do
+    -- Create fresh type variables for declared type parameters (e.g., <Msg>)
+    -- and temporarily register them so fromSurfaceType resolves TApp "Msg" []
+    -- to the same TV throughout the function's type annotations.
+    freshTyVars <- mapM (const fresh) tyParams
+    let newBinds = M.fromList (zip tyParams freshTyVars)
+    oldBinds <- gets tyVarBinds
+    modify' (\s -> s { tyVarBinds = M.union newBinds (tyVarBinds s) })
+
     paramTypes <- mapM (\(Param _ mt) -> maybe fresh fromSurfaceType mt) params
     retType <- maybe fresh fromSurfaceType mRet
     let funType = TFunT paramTypes retType
@@ -700,6 +728,9 @@ inferStmt env (Located sp stmt) = withCurrentSpan sp $ case stmt of
             (zip params paramTypes)
 
     (sBody, _) <- inferBlockWithRet (Just retType) envParams body
+
+    -- Restore tyVarBinds
+    modify' (\s -> s { tyVarBinds = oldBinds })
 
     let funTypeFinal = apply sBody funType
         envApplied = apply sBody env

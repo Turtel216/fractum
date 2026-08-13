@@ -30,7 +30,7 @@ lowerStmt (Located _ stmt) = case stmt of
     Immutable -> J.JSConst n (lowerExpr e)
     Mutable   -> J.JSLet   n (lowerExpr e)
 
-  SFun name params _retTy body ->
+  SFun name _tyParams params _retTy body ->
     J.JSFunction name (map paramName params) (lowerBlock body)
 
   SReturn me ->

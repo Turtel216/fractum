@@ -8,6 +8,58 @@
 //   2. Cmd<Msg> for side effects (Component 2)
 //   3. The runtime's Model-View-Update loop (Component 3)
 
+// -- Standard Library Types --
+// (These would normally be imported; inlined here since there's no module system)
+
+enum Attribute<Msg> {
+    Class(String),
+    Id(String),
+    Style(String, String),
+    Placeholder(String),
+    Value(String),
+    Type(String),
+    Disabled(Bool),
+    Href(String),
+    Src(String),
+    Alt(String),
+    OnClick(Msg),
+    OnInput(String -> Msg),
+    OnSubmit(Msg),
+    OnChange(String -> Msg),
+    OnMouseEnter(Msg),
+    OnMouseLeave(Msg),
+    OnKeyDown(Int -> Msg),
+    OnFocus(Msg),
+    OnBlur(Msg),
+}
+
+enum KeyedItem<Msg> {
+    KeyedItem(String, Html<Msg>),
+}
+
+enum Html<Msg> {
+    Node(String, [Attribute<Msg>], [Html<Msg>]),
+    Keyed(String, [Attribute<Msg>], [KeyedItem<Msg>]),
+    Text(String),
+    Empty,
+}
+
+enum Result<T, E> {
+    Ok(T),
+    Err(E),
+}
+
+enum Cmd<Msg> {
+    CmdNone,
+    CmdBatch([Cmd<Msg>]),
+    HttpGet(String, (Result<String, String>) -> Msg),
+    HttpPost(String, String, (Result<String, String>) -> Msg),
+    Delay(Int, Msg),
+    RandomInt(Int, Int, (Int) -> Msg),
+    FocusElement(String),
+    ConsoleLog(String),
+}
+
 // -- Model --
 
 type Model = { count: Int, label: String };
@@ -24,86 +76,68 @@ enum Msg {
 }
 
 // -- Init --
-// Returns [model, cmd] — a two-element array since there are no tuples.
+// Returns { model, cmd } record
 
-function init(): [Model, Cmd<Msg>] {
-    return [{ count: 0, label: "Counter" }, Cmd::CmdNone];
+function init() {
+    return { model: { count: 0, label: "Counter" }, cmd: Cmd::CmdNone };
 }
 
 // -- Update --
-// Pure function: takes a message and current model, returns new model + command.
+// Pure function: takes a message and current model, returns { model, cmd }.
 // No side effects happen here — Cmd values are descriptions, not actions.
 
-function update(msg: Msg, model: Model): [Model, Cmd<Msg>] {
+function update(msg: Msg, model: Model) {
     return match (msg) {
-        Msg::Increment => [
-            { count: model.count + 1, label: model.label },
-            Cmd::CmdNone,
-        ],
-        Msg::Decrement => [
-            { count: model.count - 1, label: model.label },
-            Cmd::CmdNone,
-        ],
-        Msg::Reset => [
-            { count: 0, label: model.label },
-            Cmd::CmdNone,
-        ],
-        Msg::SetLabel(newLabel) => [
-            { count: model.count, label: newLabel },
-            Cmd::CmdNone,
-        ],
-        Msg::DelayedIncrement => [
-            model,
-            Cmd::Delay(1000, Msg::IncrementAfterDelay),
-        ],
-        Msg::IncrementAfterDelay => [
-            { count: model.count + 1, label: model.label },
-            Cmd::ConsoleLog("Delayed increment complete!"),
-        ],
+        Msg::Increment => { model: { count: model.count + 1, label: model.label }, cmd: Cmd::CmdNone },
+        Msg::Decrement => { model: { count: model.count - 1, label: model.label }, cmd: Cmd::CmdNone },
+        Msg::Reset => { model: { count: 0, label: model.label }, cmd: Cmd::CmdNone },
+        Msg::SetLabel(newLabel) => { model: { count: model.count, label: newLabel }, cmd: Cmd::CmdNone },
+        Msg::DelayedIncrement => { model: model, cmd: Cmd::Delay(1000, Msg::IncrementAfterDelay) },
+        Msg::IncrementAfterDelay => { model: { count: model.count + 1, label: model.label }, cmd: Cmd::ConsoleLog("Delayed increment complete!") },
     };
 }
 
 // -- View --
 // Pure function: model → virtual DOM tree. No mutation, no side effects.
 
-function view(model: Model): Html<Msg> {
-    return div([Attribute::Class("app-container")], [
-        h1([], [text(model.label)]),
+function view(model: Model) {
+    return Html::Node("div", [Attribute::Class("app-container")], [
+        Html::Node("h1", [], [Html::Text(model.label)]),
 
-        div([Attribute::Class("counter-display")], [
-            span([Attribute::Class("count")], [text(toString(model.count))]),
+        Html::Node("div", [Attribute::Class("counter-display")], [
+            Html::Node("span", [Attribute::Class("count")], [Html::Text(toString(model.count))]),
         ]),
 
-        div([Attribute::Class("button-group")], [
-            button(
+        Html::Node("div", [Attribute::Class("button-group")], [
+            Html::Node("button",
                 [Attribute::OnClick(Msg::Decrement), Attribute::Class("btn btn-minus")],
-                [text("-")]
+                [Html::Text("-")]
             ),
-            button(
+            Html::Node("button",
                 [Attribute::OnClick(Msg::Reset), Attribute::Class("btn btn-reset")],
-                [text("Reset")]
+                [Html::Text("Reset")]
             ),
-            button(
+            Html::Node("button",
                 [Attribute::OnClick(Msg::Increment), Attribute::Class("btn btn-plus")],
-                [text("+")]
+                [Html::Text("+")]
             ),
         ]),
 
-        div([Attribute::Class("delay-section")], [
-            button(
+        Html::Node("div", [Attribute::Class("delay-section")], [
+            Html::Node("button",
                 [Attribute::OnClick(Msg::DelayedIncrement), Attribute::Class("btn btn-delay")],
-                [text("Increment after 1s")]
+                [Html::Text("Increment after 1s")]
             ),
         ]),
 
-        div([Attribute::Class("label-section")], [
-            label([], [text("Label: ")]),
-            input([
+        Html::Node("div", [Attribute::Class("label-section")], [
+            Html::Node("label", [], [Html::Text("Label: ")]),
+            Html::Node("input", [
                 Attribute::Type("text"),
                 Attribute::Value(model.label),
                 Attribute::OnInput((s) => Msg::SetLabel(s)),
                 Attribute::Placeholder("Enter a label..."),
-            ]),
+            ], []),
         ]),
     ]);
 }

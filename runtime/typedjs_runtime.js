@@ -957,8 +957,8 @@
 
         for (let i = 0; i < msgs.length; i++) {
           const result = config.update(msgs[i], model);
-          model = result[0];   // new model
-          cmds.push(result[1]); // cmd
+          model = result.model;   // new model
+          cmds.push(result.cmd); // cmd
         }
 
         currentModel = model;
@@ -989,8 +989,8 @@
 
       // ---- Initialization ----
       const initResult = config.init();
-      currentModel = initResult[0];
-      const initialCmd = initResult[1];
+      currentModel = initResult.model;
+      const initialCmd = initResult.cmd;
 
       // First render
       currentVNode = config.view(currentModel);

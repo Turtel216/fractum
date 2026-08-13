@@ -36,7 +36,7 @@ newtype Program = Program [LStmt]
 -- | Language Statement
 data Stmt
   = SLet Mutability Name (Maybe Type) LExpr
-  | SFun Name [Param] (Maybe Type) Block
+  | SFun Name [Name] [Param] (Maybe Type) Block
   | SReturn (Maybe LExpr)
   | SIf LExpr Block (Maybe Block)
   | SWhile LExpr Block
