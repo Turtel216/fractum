@@ -1,0 +1,148 @@
+// ==========================================
+// Counter.tjs
+// Example: A complete counter app using the Elm Architecture
+// ==========================================
+//
+// This demonstrates all three components working together:
+//   1. Html<Msg> for building the UI (Component 1)
+//   2. Cmd<Msg> for side effects (Component 2)
+//   3. The runtime's Model-View-Update loop (Component 3)
+
+// -- Standard Library Types --
+// (These would normally be imported; inlined here since there's no module system)
+
+enum Attribute<Msg> {
+    Class(String),
+    Id(String),
+    Style(String, String),
+    Placeholder(String),
+    Value(String),
+    Type(String),
+    Disabled(Bool),
+    Href(String),
+    Src(String),
+    Alt(String),
+    OnClick(Msg),
+    OnInput(String -> Msg),
+    OnSubmit(Msg),
+    OnChange(String -> Msg),
+    OnMouseEnter(Msg),
+    OnMouseLeave(Msg),
+    OnKeyDown(Int -> Msg),
+    OnFocus(Msg),
+    OnBlur(Msg),
+}
+
+enum Html<Msg> {
+    Node(String, [Attribute<Msg>], [Html<Msg>]),
+    Text(String),
+    Empty,
+}
+//enum Html<Msg> {
+    //Node(String, [Attribute<Msg>], [Html<Msg>]),
+    //Keyed(String, [Attribute<Msg>], [KeyedItem<Msg>]),
+    //Text(String),
+    //Empty,
+//}
+
+//enum KeyedItem<Msg> {
+//    KeyedItem(String, Html<Msg>),
+//}
+
+enum Result<T, E> {
+    Ok(T),
+    Err(E),
+}
+
+enum Cmd<Msg> {
+    CmdNone,
+    CmdBatch([Cmd<Msg>]),
+    HttpGet(String, (Result<String, String>) -> Msg),
+    HttpPost(String, String, (Result<String, String>) -> Msg),
+    Delay(Int, Msg),
+    RandomInt(Int, Int, (Int) -> Msg),
+    FocusElement(String),
+    ConsoleLog(String),
+}
+
+// -- Model --
+
+type Model = { count: Int, label: String };
+
+// -- Messages --
+
+enum Msg {
+    Increment,
+    Decrement,
+    Reset,
+    SetLabel(String),
+    DelayedIncrement,
+    IncrementAfterDelay,
+}
+
+// -- Init --
+// Returns { model, cmd } record
+
+function init() {
+    return { model: { count: 0, label: "Counter" }, cmd: Cmd::CmdNone };
+}
+
+// -- Update --
+// Pure function: takes a message and current model, returns { model, cmd }.
+// No side effects happen here — Cmd values are descriptions, not actions.
+
+function update(msg: Msg, model: Model) {
+    return match (msg) {
+        Msg::Increment => { model: { count: model.count + 1, label: model.label }, cmd: Cmd::CmdNone },
+        Msg::Decrement => { model: { count: model.count - 1, label: model.label }, cmd: Cmd::CmdNone },
+        Msg::Reset => { model: { count: 0, label: model.label }, cmd: Cmd::CmdNone },
+        Msg::SetLabel(newLabel) => { model: { count: model.count, label: newLabel }, cmd: Cmd::CmdNone },
+        Msg::DelayedIncrement => { model: model, cmd: Cmd::Delay(1000, Msg::IncrementAfterDelay) },
+        Msg::IncrementAfterDelay => { model: { count: model.count + 1, label: model.label }, cmd: Cmd::ConsoleLog("Delayed increment complete!") },
+    };
+}
+
+// -- View --
+// Pure function: model → virtual DOM tree. No mutation, no side effects.
+
+function view(model: Model) {
+    return Html::Node("div", [Attribute::Class("app-container")], [
+        Html::Node("h1", [], [Html::Text(model.label)]),
+
+        Html::Node("div", [Attribute::Class("counter-display")], [
+            Html::Node("span", [Attribute::Class("count")], [Html::Text(toString(model.count))]),
+        ]),
+
+        Html::Node("div", [Attribute::Class("button-group")], [
+            Html::Node("button",
+                [Attribute::OnClick(Msg::Decrement), Attribute::Class("btn btn-minus")],
+                [Html::Text("-")]
+            ),
+            Html::Node("button",
+                [Attribute::OnClick(Msg::Reset), Attribute::Class("btn btn-reset")],
+                [Html::Text("Reset")]
+            ),
+            Html::Node("button",
+                [Attribute::OnClick(Msg::Increment), Attribute::Class("btn btn-plus")],
+                [Html::Text("+")]
+            ),
+        ]),
+
+        Html::Node("div", [Attribute::Class("delay-section")], [
+            Html::Node("button",
+                [Attribute::OnClick(Msg::DelayedIncrement), Attribute::Class("btn btn-delay")],
+                [Html::Text("Increment after 1s")]
+            ),
+        ]),
+
+        Html::Node("div", [Attribute::Class("label-section")], [
+            Html::Node("label", [], [Html::Text("Label: ")]),
+            Html::Node("input", [
+                Attribute::Type("text"),
+                Attribute::Value(model.label),
+                Attribute::OnInput((s) => Msg::SetLabel(s)),
+                Attribute::Placeholder("Enter a label..."),
+            ], []),
+        ]),
+    ]);
+}
