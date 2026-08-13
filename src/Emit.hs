@@ -77,7 +77,9 @@ ppExpr ctx = \case
 
   J.JSArrow ps body ->
     parenIf (ctx > precAssign) $
-      "(" <> csv ps <> ") => " <> ppExpr precAssign body
+      "(" <> csv ps <> ") => " <> case body of
+        J.JSObject _ -> "(" <> ppExpr 0 body <> ")"
+        _            -> ppExpr precAssign body
 
   J.JSCall f args ->
     parenIf (ctx > precCall) $
