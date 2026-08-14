@@ -17,11 +17,15 @@ import Ast
 lowerProgram :: Program -> J.JSProgram
 lowerProgram (Program ss) = J.JSProgram (map lowerStmt (filter (not . isCompileTimeDecl) ss))
 
--- | Type and enum declarations are compile-time only and produce no JS output.
+-- | Type and enum declarations (and imports, fully consumed by the module
+-- resolver before this stage) are compile-time only and produce no JS
+-- output. An 'SExport' defers to whatever it wraps.
 isCompileTimeDecl :: LStmt -> Bool
-isCompileTimeDecl (Located _ (STypeDecl {})) = True
-isCompileTimeDecl (Located _ (SEnum {}))     = True
-isCompileTimeDecl _                          = False
+isCompileTimeDecl (Located _ (STypeDecl {}))  = True
+isCompileTimeDecl (Located _ (SEnum {}))      = True
+isCompileTimeDecl (Located _ (SImport {}))    = True
+isCompileTimeDecl (Located _ (SExport inner)) = isCompileTimeDecl inner
+isCompileTimeDecl _                           = False
 
 -- | Lower LStmt into JsStmt
 lowerStmt :: LStmt -> J.JSStmt
@@ -53,6 +57,12 @@ lowerStmt (Located _ stmt) = case stmt of
 
   SEnum {} ->
     error "lowerStmt: SEnum should have been filtered out"
+
+  SExport inner ->
+    lowerStmt inner
+
+  SImport {} ->
+    error "lowerStmt: SImport should have been filtered out"
 
 lowerBlock :: Block -> J.JSBlock
 lowerBlock (Block ss) = J.JSBlock (map lowerStmt (filter (not . isCompileTimeDecl) ss))

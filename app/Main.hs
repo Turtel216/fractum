@@ -14,9 +14,10 @@ main = do
   opts <- execParser optsInfo
   let file = head $ sourceFile opts
       outputF = fromMaybe "out.js" (outputFile opts)
-  src <- TIO.readFile file
 
-  case compileSource (disableColor opts) file src of
+  result <- compileFile (disableColor opts) file
+
+  case result of
     Left err -> do
       -- Print compilation errors to stderr so they don't pollute stdout
       TIO.hPutStrLn stderr err
