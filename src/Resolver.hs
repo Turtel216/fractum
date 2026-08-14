@@ -7,14 +7,14 @@
 -- from a single entry file:
 --
 -- * __Discovery__ (IO): recursively reads and parses every transitively
---  imported file, resolving relative import paths, memoizing already-seen
---  modules, and detecting import cycles.
+-- imported file, resolving relative import paths, memoizing already-seen
+-- modules, and detecting import cycles.
 --
 -- * __Link__ (pure): walks the discovered modules in dependency order and
---  flattens them into a single 'Program'. Top-level declaration names that
---  would otherwise collide across modules are renamed; each 'SImport' is
---  replaced with a small forwarding declaration under its local alias,
---  pointing at the final name of whatever it imports.
+-- flattens them into a single 'Program'. Top-level declaration names that
+-- would otherwise collide across modules are renamed; each 'SImport' is
+-- replaced with a small forwarding declaration under its local alias,
+-- pointing at the final name of whatever it imports.
 --
 -- The output of 'resolveEntry' is an ordinary, single-module-looking
 -- 'Program' that the existing (module-agnostic) typechecker, desugarer, and
@@ -59,7 +59,7 @@ resolveImportPath :: FilePath -> Text -> FilePath
 resolveImportPath importingFile rawPath =
   let dir = takeDirectory importingFile
       p = T.unpack rawPath
-      withExt = if null (takeExtension p) then p <.> "tjs" else p
+      withExt = if null (takeExtension p) then p <.> "fr" else p
    in normalise (dir </> withExt)
 
 -- | Depth-first discovery of the module graph starting at 'path'. 'stack' is

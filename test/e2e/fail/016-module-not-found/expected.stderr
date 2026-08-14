@@ -2,5 +2,5 @@ error[E0014]: module not found
  --> $FILE:1:1
   |
 1 | import { x } from "./missing";
-  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ cannot find module `test/e2e/fail/016-module-not-found/missing.tjs`
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ cannot find module `test/e2e/fail/016-module-not-found/missing.fr`
   |
