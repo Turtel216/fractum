@@ -183,10 +183,10 @@ while (i < 5) {
 
 ### Modules
 
-Fractum supports a TypeScript-like named import/export system. `export` prefixes a top-level `let`, `function`, `type`, or `enum` declaration to make it visible to other files; `import` pulls named declarations in from another file by relative path (the `.tjs` extension is optional).
+Fractum supports a TypeScript-like named import/export system. `export` prefixes a top-level `let`, `function`, `type`, or `enum` declaration to make it visible to other files; `import` pulls named declarations in from another file by relative path (the `.fr` extension is optional).
 
 ```ts
-// math.tjs
+// math.fr
 export function add(x: Int, y: Int): Int {
   return x + y;
 }
@@ -194,7 +194,7 @@ export let PI = 3;
 ```
 
 ```ts
-// main.tjs
+// main.fr
 import { add, PI as Pi } from "./math";
 
 print(add(1, Pi));
@@ -256,13 +256,13 @@ re-renders on every message via a keyed/unkeyed virtual DOM diff. No hand-writte
 JavaScript glue is needed after compiling.
 
 The standard library also covers side effects and subscriptions without breaking
-purity: `Cmd<Msg>` (`stdlib/Cmd.tjs`) describes effects such as HTTP requests, timers,
+purity: `Cmd<Msg>` (`stdlib/Cmd.fr`) describes effects such as HTTP requests, timers,
 and local storage access, which the runtime interprets and feeds back in as `Msg`
-values; `Sub<Msg>` (`stdlib/Sub.tjs`) describes standing subscriptions such as
+values; `Sub<Msg>` (`stdlib/Sub.fr`) describes standing subscriptions such as
 animation frames, key presses, and window resizes. `Option<T>` and `Result<T, E>`
-(`stdlib/Option.tjs`, `stdlib/Result.tjs`) round out the library and are used
+(`stdlib/Option.fr`, `stdlib/Result.fr`) round out the library and are used
 throughout to keep `null`/`undefined` and thrown exceptions out of application code.
-See `examples/Counter.tjs` for a complete, runnable application.
+See `examples/Counter.fr` for a complete, runnable application.
 
 ## Diagnostics and Error Reporting
 
@@ -285,7 +285,7 @@ Fractum features a detailed diagnostic engine. Below is a catalog of currently i
 | E0012 | Variant Arity Mismatch | variant `Some` of enum `Option` expects 1 field(s) but 2 were given |
 | E0014 | Module not found     | cannot find module `./missing`                         |
 | E0015 | Unbound import       | module `./math` has no exported member `sub`           |
-| E0016 | Circular import      | modules form a cycle: `a.tjs -> b.tjs -> a.tjs`         |
+| E0016 | Circular import      | modules form a cycle: `a.fr -> b.fr -> a.fr`         |
 | E0099 | Internal / General   | raw message                                            |
 
 ## Roadmap and Current Limitations
@@ -298,7 +298,7 @@ Fractum features a detailed diagnostic engine. Below is a catalog of currently i
 *   Polymorphic functions and type aliases
 *   Algebraic data types (ADTs) and pattern matching
 *   Module and import system (bundled to a single JavaScript output)
-*   DOM manipulation via the Elm Architecture (`stdlib/Html.tjs`, `stdlib/Cmd.tjs`, `stdlib/Sub.tjs`) backed by a virtual DOM runtime
+*   DOM manipulation via the Elm Architecture (`stdlib/Html.fr`, `stdlib/Cmd.fr`, `stdlib/Sub.fr`) backed by a virtual DOM runtime
 
 **Future Enhancements:**
 *   Optimization pipeline
