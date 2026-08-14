@@ -9,13 +9,14 @@ type Name = Text
 data Pos = Pos { posLine :: !Int, posCol :: !Int }
   deriving (Eq, Ord, Show)
 
--- | Source span from start to end
-data Span = Span { spanStart :: !Pos, spanEnd :: !Pos }
+-- | Source span from start to end, tagged with the file it belongs to so
+-- that diagnostics spanning multiple modules can locate the right source.
+data Span = Span { spanFile :: !FilePath, spanStart :: !Pos, spanEnd :: !Pos }
   deriving (Eq, Ord, Show)
 
 -- | A dummy span for synthetic / generated nodes
 dummySpan :: Span
-dummySpan = Span (Pos 0 0) (Pos 0 0)
+dummySpan = Span "" (Pos 0 0) (Pos 0 0)
 
 -- | A value annotated with a source span
 data Located a = Located { locSpan :: !Span, locVal :: a }
@@ -44,6 +45,12 @@ data Stmt
   | SBlock Block
   | STypeDecl Name [Name] Type   -- ^ e.g. type Foo<A, B> = { ... };
   | SEnum Name [Name] [Variant]  -- ^ e.g. enum Shape<T> { Circle(T), Point }
+  | SImport [ImportItem] Text    -- ^ e.g. import { a, b as c } from "./path";
+  | SExport LStmt                -- ^ e.g. export let x = 1;
+  deriving (Eq, Show)
+
+-- | A single imported name, with an optional local alias.
+data ImportItem = ImportItem { importName :: Name, importAlias :: Maybe Name }
   deriving (Eq, Show)
 
 -- | A single variant inside an enum declaration

@@ -1,0 +1,6 @@
+error[E0015]: no exported member
+ --> $FILE:1:1
+  |
+1 | import { z } from "./mod";
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^^ module `./mod` has no exported member `z`
+  |

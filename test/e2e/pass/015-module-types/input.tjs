@@ -1,0 +1,11 @@
+import { Point, Shape } from "./shapes";
+
+let p: Point = { x: 1, y: 2 };
+print(p.x + p.y);
+
+let s = Shape::Circle(5);
+let area = match (s) {
+  Shape::Circle(r) => r * r * 3,
+  Shape::Square(side) => side * side,
+};
+print(area);

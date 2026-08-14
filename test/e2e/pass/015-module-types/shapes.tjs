@@ -1,0 +1,6 @@
+export type Point = { x: Int, y: Int };
+
+export enum Shape {
+  Circle(Int),
+  Square(Int),
+}

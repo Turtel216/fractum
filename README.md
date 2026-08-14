@@ -182,6 +182,27 @@ while (i < 5) {
 }
 ```
 
+### Modules
+
+Fractum supports a TypeScript-like named import/export system. `export` prefixes a top-level `let`, `function`, `type`, or `enum` declaration to make it visible to other files; `import` pulls named declarations in from another file by relative path (the `.tjs` extension is optional).
+
+```ts
+// math.tjs
+export function add(x: Int, y: Int): Int {
+  return x + y;
+}
+export let PI = 3;
+```
+
+```ts
+// main.tjs
+import { add, PI as Pi } from "./math";
+
+print(add(1, Pi));
+```
+
+Aliasing with `as` is supported for both value and type/enum imports. There is no bundler or module loader involved at runtime: the compiler resolves the whole import graph itself and emits a single, readable JavaScript file, renaming any identifiers that would otherwise collide across files.
+
 ## Example Compilation
 
 ### Input
@@ -240,6 +261,9 @@ Fractum features a detailed diagnostic engine. Below is a catalog of currently i
 | E0011 | Unknown Variant      | variant `Bogus` does not exist on enum `Shape` |
 | E0012 | Unknown Enum         | enum `Option` is not defined |
 | E0012 | Variant Arity Mismatch | variant `Some` of enum `Option` expects 1 field(s) but 2 were given |
+| E0014 | Module not found     | cannot find module `./missing`                         |
+| E0015 | Unbound import       | module `./math` has no exported member `sub`           |
+| E0016 | Circular import      | modules form a cycle: `a.tjs -> b.tjs -> a.tjs`         |
 | E0099 | Internal / General   | raw message                                            |
 
 ## Roadmap and Current Limitations
@@ -251,9 +275,9 @@ Fractum features a detailed diagnostic engine. Below is a catalog of currently i
 *   Immutability by default and mutation checks
 *   Polymorphic functions and type aliases
 *   Algebraic data types (ADTs) and pattern matching
+*   Module and import system (bundled to a single JavaScript output)
 
 **Future Enhancements:**
-*   Module and import system
 *   Optimization pipeline
 *   Flexible object typing while preserving static structural safety.
 *   Language Server Protocol (LSP) integration and a dedicated code formatter.

@@ -12,13 +12,12 @@ import qualified Data.Text as T
 import qualified Data.Text.IO as T
 import qualified Data.Text.Encoding as TE
 import qualified Data.ByteString.Lazy as BL
-import Driver(compileSource)
+import Driver(compileFile)
 
--- | Helper for the E2E test suite. Runs the compiler pipeline
+-- | Helper for the E2E test suite. Runs the compiler pipeline, resolving
+-- any imports relative to 'inputFile'.
 compileToJS :: FilePath -> IO (Either T.Text T.Text)
-compileToJS inputFile = do
-  src <- T.readFile inputFile
-  return $ compileSource True inputFile src 
+compileToJS inputFile = compileFile True inputFile
 
 main :: IO ()
 main = do

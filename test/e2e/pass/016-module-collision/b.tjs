@@ -1,0 +1,7 @@
+function helper(x: Int): Int {
+  return x * 2;
+}
+
+export function fromB(x: Int): Int {
+  return helper(x);
+}

@@ -98,7 +98,7 @@ withSpan p = do
   start <- getSourcePos
   x <- p
   end <- getSourcePos
-  pure (Located (Span (toPos start) (toPos end)) x)
+  pure (Located (Span (MP.sourceName start) (toPos start) (toPos end)) x)
 
 -- | Parse complete program
 parseProgram :: FilePath -> Text -> Either String Program
@@ -166,6 +166,10 @@ reserved =
     "type",
     "enum",
     "match",
+    "import",
+    "export",
+    "from",
+    "as",
     "Int",
     "Bool",
     "String"
@@ -219,6 +223,8 @@ pStmt =
       try (withSpan pTypeDecl),
       try (withSpan pFunDecl),
       try (withSpan pLet),
+      try (withSpan pImportDecl),
+      try (withSpan pExportDecl),
       withSpan pReturn,
       withSpan pIf,
       withSpan pWhile,
@@ -271,6 +277,27 @@ pEnumDecl = do
       vname <- upperIdentifier
       fields <- MP.option [] (parens (pType `sepBy` comma))
       pure (Variant vname fields)
+
+-- | Parse import declaration: @import { a, b as c } from "./path";@
+pImportDecl :: Parser Stmt
+pImportDecl = do
+  rword "import"
+  items <- braces (pImportItem `sepBy1` comma)
+  rword "from"
+  path <- stringLit
+  void semi
+  pure (SImport items path)
+  where
+    pImportItem = do
+      n <- identifier <|> upperIdentifier
+      alias <- optional (rword "as" *> (identifier <|> upperIdentifier))
+      pure (ImportItem n alias)
+
+-- | Parse export declaration: @export <let|function|type|enum>@
+pExportDecl :: Parser Stmt
+pExportDecl = do
+  rword "export"
+  SExport <$> withSpan (choice [pLet, pFunDecl, pTypeDecl, pEnumDecl])
 
 -- | Parse Declaration
 pFunDecl :: Parser Stmt
@@ -336,7 +363,7 @@ pAssign = do
     Nothing -> pure lhs
     Just _ -> do
       rhs <- pAssign
-      let sp = Span (spanStart (locSpan lhs)) (spanEnd (locSpan rhs))
+      let sp = Span (spanFile (locSpan lhs)) (spanStart (locSpan lhs)) (spanEnd (locSpan rhs))
       pure (Located sp (EAssign lhs rhs))
 
 -- | Parse Logical Or
@@ -427,18 +454,18 @@ pPostfix = do
         [ try $ do
             args <- parens (map Arg <$> (pExpr `sepBy` comma))
             endP <- getSourcePos
-            let sp = Span (spanStart (locSpan e)) (toPos endP)
+            let sp = Span (spanFile (locSpan e)) (spanStart (locSpan e)) (toPos endP)
             pChain (Located sp (ECall e args)),
           try $ do
             void (symbol ".")
             f <- identifier
             endP <- getSourcePos
-            let sp = Span (spanStart (locSpan e)) (toPos endP)
+            let sp = Span (spanFile (locSpan e)) (spanStart (locSpan e)) (toPos endP)
             pChain (Located sp (EMember e f)),
           try $ do
             ix <- brackets pExpr
             endP <- getSourcePos
-            let sp = Span (spanStart (locSpan e)) (toPos endP)
+            let sp = Span (spanFile (locSpan e)) (spanStart (locSpan e)) (toPos endP)
             pChain (Located sp (EIndex e ix)),
           pure e
         ]
@@ -641,7 +668,7 @@ chainl1 p op = do
       ( do
           f <- op
           y <- p
-          let sp = Span (spanStart (locSpan x)) (spanEnd (locSpan y))
+          let sp = Span (spanFile (locSpan x)) (spanStart (locSpan x)) (spanEnd (locSpan y))
           rest (Located sp (f x y))
       )
         <|> pure x

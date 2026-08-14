@@ -1,0 +1,7 @@
+function helper(x: Int): Int {
+  return x + 1;
+}
+
+export function fromA(x: Int): Int {
+  return helper(x);
+}

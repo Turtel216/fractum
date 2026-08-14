@@ -1,0 +1,3 @@
+import { value as v } from "./mod";
+
+print(v);
