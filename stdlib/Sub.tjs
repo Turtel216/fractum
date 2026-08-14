@@ -7,13 +7,13 @@
 // time intervals, animation frames, or global window events. The runtime
 // manages the actual event listeners and routes them back as Messages.
 
-enum Sub<Msg> {
+export enum Sub<Msg> {
     SubNone,
     SubBatch([Sub<Msg>]),
-    OnAnimationFrame((Float) -> Msg),      // timestamp mapper
+    OnAnimationFrame((Int) -> Msg),        // timestamp mapper (no Float type yet)
     OnWindowResize((Int) -> (Int) -> Msg), // width -> height -> Msg (curried since no tuples)
     OnKeyPress((Int) -> Msg),              // keyCode mapper
-    Every(Int, (Float) -> Msg),            // interval ms, timestamp mapper
+    Every(Int, (Int) -> Msg),              // interval ms, timestamp mapper
 }
 
 // ---------------------------------------------------------
@@ -21,11 +21,11 @@ enum Sub<Msg> {
 // ---------------------------------------------------------
 
 // Returns a subscription that does nothing. Useful when no active subscriptions are needed.
-function sub_none<Msg>(): Sub<Msg> {
+export function sub_none<Msg>(): Sub<Msg> {
     return Sub::SubNone;
 }
 
 // Combines multiple subscriptions into a single batched subscription.
-function sub_batch<Msg>(subs: [Sub<Msg>]): Sub<Msg> {
+export function sub_batch<Msg>(subs: [Sub<Msg>]): Sub<Msg> {
     return Sub::SubBatch(subs);
 }

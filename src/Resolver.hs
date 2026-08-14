@@ -7,14 +7,14 @@
 -- from a single entry file:
 --
 -- * __Discovery__ (IO): recursively reads and parses every transitively
---   imported file, resolving relative import paths, memoizing already-seen
---   modules, and detecting import cycles.
+--  imported file, resolving relative import paths, memoizing already-seen
+--  modules, and detecting import cycles.
 --
 -- * __Link__ (pure): walks the discovered modules in dependency order and
---   flattens them into a single 'Program'. Top-level declaration names that
---   would otherwise collide across modules are renamed; each 'SImport' is
---   replaced with a small forwarding declaration under its local alias,
---   pointing at the final name of whatever it imports.
+--  flattens them into a single 'Program'. Top-level declaration names that
+--  would otherwise collide across modules are renamed; each 'SImport' is
+--  replaced with a small forwarding declaration under its local alias,
+--  pointing at the final name of whatever it imports.
 --
 -- The output of 'resolveEntry' is an ordinary, single-module-looking
 -- 'Program' that the existing (module-agnostic) typechecker, desugarer, and
@@ -36,17 +36,14 @@ import System.Directory (doesFileExist)
 import System.FilePath (normalise, takeDirectory, takeExtension, (<.>), (</>))
 import Typecheck (TypeError (..), TypeErrorKind (..))
 
---------------------------------------------------------------------------------
--- Phase A: discovery
---------------------------------------------------------------------------------
-
 -- | A single parsed module: its normalised file path and top-level
 -- statements.
 data ModuleUnit = ModuleUnit FilePath [LStmt]
 
 data DiscoverState = DiscoverState
   { dsVisited :: M.Map FilePath ModuleUnit,
-    dsOrder :: [FilePath], -- ^ dependency order: deps before dependents
+    -- | dependency order: deps before dependents
+    dsOrder :: [FilePath],
     dsSources :: M.Map FilePath Text
   }
 
@@ -99,10 +96,6 @@ discoverModule stack path mImportSpan
                             dsOrder = dsOrder s ++ [path]
                           }
                     )
-
---------------------------------------------------------------------------------
--- Phase B: rename + flatten
---------------------------------------------------------------------------------
 
 -- | Where a module-local declared name ends up after collision-renaming,
 -- plus (for type/enum declarations) its original type parameters, needed to
@@ -338,7 +331,7 @@ resolveImports exportsByModule thisPath stmts =
     maybeToList Nothing = []
     maybeToList (Just x) = [x]
 
-    -- | A forwarding declaration is only needed when the local alias
+    -- \| A forwarding declaration is only needed when the local alias
     -- differs from the dependency's final name — when they're the same,
     -- the dependency's own (already-flattened, earlier-in-order)
     -- declaration is already directly usable under that exact name, and

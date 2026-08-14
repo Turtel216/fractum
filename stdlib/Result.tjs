@@ -1,0 +1,31 @@
+// ==========================================
+// Result.tjs
+// Recoverable Errors
+// ==========================================
+//
+// Result<T, E> represents either a successful value or an error. It is used
+// throughout the standard library to report the outcome of side effects
+// (see Cmd.tjs) without throwing exceptions into pure application code.
+
+export enum Result<T, E> {
+    Ok(T),
+    Err(E),
+}
+
+// ---------------------------------------------------------
+// Helper Functions
+// ---------------------------------------------------------
+
+export function result_map<T, E, B>(res: Result<T, E>, f: (T) -> B): Result<B, E> {
+    return match (res) {
+        Result::Ok(v) => Result::Ok(f(v)),
+        Result::Err(e) => Result::Err(e),
+    };
+}
+
+export function result_unwrap_or<T, E>(res: Result<T, E>, fallback: T): T {
+    return match (res) {
+        Result::Ok(v) => v,
+        Result::Err(e) => fallback,
+    };
+}

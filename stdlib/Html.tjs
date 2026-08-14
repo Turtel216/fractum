@@ -6,7 +6,7 @@
 // Attribute<Msg> — all the attributes a DOM node can have.
 // Event handlers are strictly typed to enforce sanitization and prevent arbitrary
 // DOM events from leaking into the pure application logic.
-enum Attribute<Msg> {
+export enum Attribute<Msg> {
     Class(String),
     Id(String),
     Style(String, String),         // property, value
@@ -29,13 +29,15 @@ enum Attribute<Msg> {
     OnBlur(Msg),
 }
 
-// KeyedItem<Msg> — used for keyed children (no tuples in the language)
-enum KeyedItem<Msg> {
-    KeyedItem(String, Html<Msg>),
-}
+// KeyedItem<Msg> — a keyed child (no tuples in the language).
+// This is a type alias rather than an enum because Html<Msg> and KeyedItem<Msg>
+// are mutually recursive, and the compiler resolves enum variant field types
+// eagerly at declaration time, so one side of a recursive pair must be a
+// lazily-expanded alias instead of a second enum.
+export type KeyedItem<Msg> = { key: String, child: Html<Msg> };
 
 // Html<Msg> — the Virtual DOM tree
-enum Html<Msg> {
+export enum Html<Msg> {
     Node(String, [Attribute<Msg>], [Html<Msg>]),
     Keyed(String, [Attribute<Msg>], [KeyedItem<Msg>]),
     Text(String),
@@ -46,128 +48,128 @@ enum Html<Msg> {
 // Builder Functions
 // ---------------------------------------------------------
 
-function text<Msg>(content: String): Html<Msg> {
+export function text<Msg>(content: String): Html<Msg> {
     return Html::Text(content);
 }
 
 // Standard Elements
-function div<Msg>(attrs: [Attribute<Msg>], children: [Html<Msg>]): Html<Msg> {
+export function div<Msg>(attrs: [Attribute<Msg>], children: [Html<Msg>]): Html<Msg> {
     return Html::Node("div", attrs, children);
 }
 
-function span<Msg>(attrs: [Attribute<Msg>], children: [Html<Msg>]): Html<Msg> {
+export function span<Msg>(attrs: [Attribute<Msg>], children: [Html<Msg>]): Html<Msg> {
     return Html::Node("span", attrs, children);
 }
 
-function p<Msg>(attrs: [Attribute<Msg>], children: [Html<Msg>]): Html<Msg> {
+export function p<Msg>(attrs: [Attribute<Msg>], children: [Html<Msg>]): Html<Msg> {
     return Html::Node("p", attrs, children);
 }
 
-function button<Msg>(attrs: [Attribute<Msg>], children: [Html<Msg>]): Html<Msg> {
+export function button<Msg>(attrs: [Attribute<Msg>], children: [Html<Msg>]): Html<Msg> {
     return Html::Node("button", attrs, children);
 }
 
-function h1<Msg>(attrs: [Attribute<Msg>], children: [Html<Msg>]): Html<Msg> {
+export function h1<Msg>(attrs: [Attribute<Msg>], children: [Html<Msg>]): Html<Msg> {
     return Html::Node("h1", attrs, children);
 }
 
-function h2<Msg>(attrs: [Attribute<Msg>], children: [Html<Msg>]): Html<Msg> {
+export function h2<Msg>(attrs: [Attribute<Msg>], children: [Html<Msg>]): Html<Msg> {
     return Html::Node("h2", attrs, children);
 }
 
-function h3<Msg>(attrs: [Attribute<Msg>], children: [Html<Msg>]): Html<Msg> {
+export function h3<Msg>(attrs: [Attribute<Msg>], children: [Html<Msg>]): Html<Msg> {
     return Html::Node("h3", attrs, children);
 }
 
-function h4<Msg>(attrs: [Attribute<Msg>], children: [Html<Msg>]): Html<Msg> {
+export function h4<Msg>(attrs: [Attribute<Msg>], children: [Html<Msg>]): Html<Msg> {
     return Html::Node("h4", attrs, children);
 }
 
-function h5<Msg>(attrs: [Attribute<Msg>], children: [Html<Msg>]): Html<Msg> {
+export function h5<Msg>(attrs: [Attribute<Msg>], children: [Html<Msg>]): Html<Msg> {
     return Html::Node("h5", attrs, children);
 }
 
-function h6<Msg>(attrs: [Attribute<Msg>], children: [Html<Msg>]): Html<Msg> {
+export function h6<Msg>(attrs: [Attribute<Msg>], children: [Html<Msg>]): Html<Msg> {
     return Html::Node("h6", attrs, children);
 }
 
-function ul<Msg>(attrs: [Attribute<Msg>], children: [Html<Msg>]): Html<Msg> {
+export function ul<Msg>(attrs: [Attribute<Msg>], children: [Html<Msg>]): Html<Msg> {
     return Html::Node("ul", attrs, children);
 }
 
-function ol<Msg>(attrs: [Attribute<Msg>], children: [Html<Msg>]): Html<Msg> {
+export function ol<Msg>(attrs: [Attribute<Msg>], children: [Html<Msg>]): Html<Msg> {
     return Html::Node("ol", attrs, children);
 }
 
-function li<Msg>(attrs: [Attribute<Msg>], children: [Html<Msg>]): Html<Msg> {
+export function li<Msg>(attrs: [Attribute<Msg>], children: [Html<Msg>]): Html<Msg> {
     return Html::Node("li", attrs, children);
 }
 
-function a<Msg>(attrs: [Attribute<Msg>], children: [Html<Msg>]): Html<Msg> {
+export function a<Msg>(attrs: [Attribute<Msg>], children: [Html<Msg>]): Html<Msg> {
     return Html::Node("a", attrs, children);
 }
 
-function form<Msg>(attrs: [Attribute<Msg>], children: [Html<Msg>]): Html<Msg> {
+export function form<Msg>(attrs: [Attribute<Msg>], children: [Html<Msg>]): Html<Msg> {
     return Html::Node("form", attrs, children);
 }
 
-function label<Msg>(attrs: [Attribute<Msg>], children: [Html<Msg>]): Html<Msg> {
+export function label<Msg>(attrs: [Attribute<Msg>], children: [Html<Msg>]): Html<Msg> {
     return Html::Node("label", attrs, children);
 }
 
-function textarea<Msg>(attrs: [Attribute<Msg>], children: [Html<Msg>]): Html<Msg> {
+export function textarea<Msg>(attrs: [Attribute<Msg>], children: [Html<Msg>]): Html<Msg> {
     return Html::Node("textarea", attrs, children);
 }
 
-function section<Msg>(attrs: [Attribute<Msg>], children: [Html<Msg>]): Html<Msg> {
+export function section<Msg>(attrs: [Attribute<Msg>], children: [Html<Msg>]): Html<Msg> {
     return Html::Node("section", attrs, children);
 }
 
-function header<Msg>(attrs: [Attribute<Msg>], children: [Html<Msg>]): Html<Msg> {
+export function header<Msg>(attrs: [Attribute<Msg>], children: [Html<Msg>]): Html<Msg> {
     return Html::Node("header", attrs, children);
 }
 
-function footer<Msg>(attrs: [Attribute<Msg>], children: [Html<Msg>]): Html<Msg> {
+export function footer<Msg>(attrs: [Attribute<Msg>], children: [Html<Msg>]): Html<Msg> {
     return Html::Node("footer", attrs, children);
 }
 
-function nav<Msg>(attrs: [Attribute<Msg>], children: [Html<Msg>]): Html<Msg> {
+export function nav<Msg>(attrs: [Attribute<Msg>], children: [Html<Msg>]): Html<Msg> {
     return Html::Node("nav", attrs, children);
 }
 
-function main_<Msg>(attrs: [Attribute<Msg>], children: [Html<Msg>]): Html<Msg> {
+export function main_<Msg>(attrs: [Attribute<Msg>], children: [Html<Msg>]): Html<Msg> {
     return Html::Node("main", attrs, children);
 }
 
-function table<Msg>(attrs: [Attribute<Msg>], children: [Html<Msg>]): Html<Msg> {
+export function table<Msg>(attrs: [Attribute<Msg>], children: [Html<Msg>]): Html<Msg> {
     return Html::Node("table", attrs, children);
 }
 
-function tr<Msg>(attrs: [Attribute<Msg>], children: [Html<Msg>]): Html<Msg> {
+export function tr<Msg>(attrs: [Attribute<Msg>], children: [Html<Msg>]): Html<Msg> {
     return Html::Node("tr", attrs, children);
 }
 
-function td<Msg>(attrs: [Attribute<Msg>], children: [Html<Msg>]): Html<Msg> {
+export function td<Msg>(attrs: [Attribute<Msg>], children: [Html<Msg>]): Html<Msg> {
     return Html::Node("td", attrs, children);
 }
 
-function th<Msg>(attrs: [Attribute<Msg>], children: [Html<Msg>]): Html<Msg> {
+export function th<Msg>(attrs: [Attribute<Msg>], children: [Html<Msg>]): Html<Msg> {
     return Html::Node("th", attrs, children);
 }
 
 // Void Elements (No children)
-function input<Msg>(attrs: [Attribute<Msg>]): Html<Msg> {
+export function input<Msg>(attrs: [Attribute<Msg>]): Html<Msg> {
     return Html::Node("input", attrs, []);
 }
 
-function img<Msg>(attrs: [Attribute<Msg>]): Html<Msg> {
+export function img<Msg>(attrs: [Attribute<Msg>]): Html<Msg> {
     return Html::Node("img", attrs, []);
 }
 
-function br<Msg>(attrs: [Attribute<Msg>]): Html<Msg> {
+export function br<Msg>(attrs: [Attribute<Msg>]): Html<Msg> {
     return Html::Node("br", attrs, []);
 }
 
-function hr<Msg>(attrs: [Attribute<Msg>]): Html<Msg> {
+export function hr<Msg>(attrs: [Attribute<Msg>]): Html<Msg> {
     return Html::Node("hr", attrs, []);
 }

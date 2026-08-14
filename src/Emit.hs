@@ -71,6 +71,10 @@ ppExpr ctx = \case
   -- Special case for prelude toString function which maps to Js's String constructor
   J.JSVar "toString" -> "String"
 
+  -- Special case for prelude app function which boots the Elm-style runtime
+  -- (see runtime/fractum_runtime.js, global.TypedJS.app)
+  J.JSVar "app" -> "TypedJS.app"
+
   J.JSVar x -> x
   
   J.JSLiteral l -> ppLit l

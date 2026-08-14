@@ -208,10 +208,10 @@
           applyAttribute(el, attrs[i], dispatch);
         }
         for (let i = 0; i < keyedItems.length; i++) {
-          // KeyedItem ADT: { _tag: "KeyedItem", _0: key, _1: childVNode }
+          // KeyedItem<Msg>: { key: String, child: Html<Msg> }
           const item = keyedItems[i];
-          const childEl = createElement(item._1, dispatch);
-          childEl.__tjs_key = item._0;
+          const childEl = createElement(item.child, dispatch);
+          childEl.__tjs_key = item.key;
           el.appendChild(childEl);
         }
         return el;
@@ -377,7 +377,7 @@
     // Build key → { index, vnode } maps
     const oldMap = new Map();
     for (let i = 0; i < oldItems.length; i++) {
-      oldMap.set(oldItems[i]._0, { idx: i, vnode: oldItems[i]._1 });
+      oldMap.set(oldItems[i].key, { idx: i, vnode: oldItems[i].child });
     }
 
     const inserts = [];   // { key, vnode, atIndex }
@@ -389,8 +389,8 @@
     const seenKeys = new Set();
 
     for (let i = 0; i < newItems.length; i++) {
-      const key = newItems[i]._0;
-      const newChild = newItems[i]._1;
+      const key = newItems[i].key;
+      const newChild = newItems[i].child;
       order.push(key);
       seenKeys.add(key);
 
@@ -409,8 +409,8 @@
 
     // Detect removed keys
     for (let i = 0; i < oldItems.length; i++) {
-      if (!seenKeys.has(oldItems[i]._0)) {
-        removes.push(oldItems[i]._0);
+      if (!seenKeys.has(oldItems[i].key)) {
+        removes.push(oldItems[i].key);
         hasChanges = true;
       }
     }
@@ -418,7 +418,7 @@
     // Check if order changed (even if individual children didn't)
     if (!hasChanges) {
       for (let i = 0; i < oldItems.length; i++) {
-        if (i >= newItems.length || oldItems[i]._0 !== newItems[i]._0) {
+        if (i >= newItems.length || oldItems[i].key !== newItems[i].key) {
           hasChanges = true;
           break;
         }

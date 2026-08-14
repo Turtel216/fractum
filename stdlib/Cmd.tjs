@@ -8,19 +8,17 @@
 // values, and the runtime interprets them and eventually feeds results back
 // into the application as Messages.
 
-enum Result<T, E> {
-    Ok(T),
-    Err(E),
-}
+import { Result } from "./Result";
+import { Option } from "./Option";
 
-enum Cmd<Msg> {
+export enum Cmd<Msg> {
     CmdNone,
     CmdBatch([Cmd<Msg>]),
     HttpGet(String, (Result<String, String>) -> Msg),
     HttpPost(String, String, (Result<String, String>) -> Msg),  // url, body, handler
     Delay(Int, Msg),                    // milliseconds, then dispatch Msg
     RandomInt(Int, Int, (Int) -> Msg),  // min, max, mapper
-    GetTime((Float) -> Msg),
+    GetTime((Int) -> Msg),               // timestamp in milliseconds (no Float type yet)
     FocusElement(String),               // by ID, fire-and-forget
     ConsoleLog(String),
     StorageGet(String, (Option<String>) -> Msg),
@@ -32,12 +30,12 @@ enum Cmd<Msg> {
 // ---------------------------------------------------------
 
 // Returns a command that does nothing. Useful for branches that have no side-effects.
-function cmd_none<Msg>(): Cmd<Msg> {
+export function cmd_none<Msg>(): Cmd<Msg> {
     return Cmd::CmdNone;
 }
 
 // Combines multiple commands into a single batched command.
 // The runtime will execute them all concurrently.
-function cmd_batch<Msg>(cmds: [Cmd<Msg>]): Cmd<Msg> {
+export function cmd_batch<Msg>(cmds: [Cmd<Msg>]): Cmd<Msg> {
     return Cmd::CmdBatch(cmds);
 }

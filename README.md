@@ -9,7 +9,6 @@ JavaScript is expressive, but its dynamic typing can shift certain bugs from com
 *   **Familiar syntax**: A JavaScript-like syntax to lower the learning curve.
 *   **Strong static typing**: Catches type-related errors before the code is executed.
 *   **HM type inference**: Reduces the burden of explicit type annotations while maintaining strong guarantees.
-*   **Readable generation**: Outputs idiomatic JavaScript that is easy to debug and deploy.
 
 Fractum is intended for experimentation, education, and as a foundation for advanced language tooling.
 
@@ -203,44 +202,67 @@ print(add(1, Pi));
 
 Aliasing with `as` is supported for both value and type/enum imports. There is no bundler or module loader involved at runtime: the compiler resolves the whole import graph itself and emits a single, readable JavaScript file, renaming any identifiers that would otherwise collide across files.
 
-## Example Compilation
+### DOM Manipulation (The Elm Architecture)
 
-### Input
+Fractum ships a small standard library (`stdlib/`) for building browser UIs in the
+style of Elm's Model-View-Update: a `Model` describes the state of the application,
+`view` renders it as a `Html<Msg>` tree, and `update` folds incoming `Msg` values into
+a new model. Rendering itself is handled by a virtual DOM diff/patch engine in the
+JavaScript runtime (`runtime/fractum_runtime.js`), so `view` stays a pure function
+with no direct DOM access.
 
-```typescript
-let id = (x) => x;
-let a = id(1);
+```ts
+import { Attribute, Html, div, button, span, text } from "./stdlib/Html";
+import { Cmd, cmd_none } from "./stdlib/Cmd";
 
-function add(x: Int, y: Int): Int {
-  return x + y;
+type Model = { count: Int };
+
+enum Msg {
+  Increment,
+  Decrement,
 }
 
-let mut b = add(a, 1);
-
-if (b > 5) {
-  print(b);
-} else {
-  b = 100;
-  print(b);
+function init(): { model: Model, cmd: Cmd<Msg> } {
+  return { model: { count: 0 }, cmd: cmd_none() };
 }
+
+function update(msg: Msg, model: Model): { model: Model, cmd: Cmd<Msg> } {
+  return match (msg) {
+    Msg::Increment => { model: { count: model.count + 1 }, cmd: cmd_none() },
+    Msg::Decrement => { model: { count: model.count - 1 }, cmd: cmd_none() },
+  };
+}
+
+function view(model: Model): Html<Msg> {
+  return div([], [
+    button([Attribute::OnClick(Msg::Decrement)], [text("-")]),
+    span([], [text(toString(model.count))]),
+    button([Attribute::OnClick(Msg::Increment)], [text("+")]),
+  ]);
+}
+
+app({
+  init:   init,
+  update: update,
+  view:   view,
+  root:   "app",
+});
 ```
 
-### Output (out.js)
+`app` is a compiler builtin that lowers directly to `TypedJS.app(...)`
+in the emitted JavaScript: it mounts onto the DOM element with the given `root` id,
+performs the first render, and thereafter drives a batched dispatch loop that
+re-renders on every message via a keyed/unkeyed virtual DOM diff. No hand-written
+JavaScript glue is needed after compiling.
 
-```javascript
-const id = (x) => x;
-const a = id(1);
-function add(x, y) {
-  return x + y;
-}
-let b = add(a, 1);
-if (b > 5) {
-  console.log(b);
-} else {
-  b = 100;
-  console.log(b);
-}
-```
+The standard library also covers side effects and subscriptions without breaking
+purity: `Cmd<Msg>` (`stdlib/Cmd.tjs`) describes effects such as HTTP requests, timers,
+and local storage access, which the runtime interprets and feeds back in as `Msg`
+values; `Sub<Msg>` (`stdlib/Sub.tjs`) describes standing subscriptions such as
+animation frames, key presses, and window resizes. `Option<T>` and `Result<T, E>`
+(`stdlib/Option.tjs`, `stdlib/Result.tjs`) round out the library and are used
+throughout to keep `null`/`undefined` and thrown exceptions out of application code.
+See `examples/Counter.tjs` for a complete, runnable application.
 
 ## Diagnostics and Error Reporting
 
@@ -276,6 +298,7 @@ Fractum features a detailed diagnostic engine. Below is a catalog of currently i
 *   Polymorphic functions and type aliases
 *   Algebraic data types (ADTs) and pattern matching
 *   Module and import system (bundled to a single JavaScript output)
+*   DOM manipulation via the Elm Architecture (`stdlib/Html.tjs`, `stdlib/Cmd.tjs`, `stdlib/Sub.tjs`) backed by a virtual DOM runtime
 
 **Future Enhancements:**
 *   Optimization pipeline

@@ -4,53 +4,52 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TupleSections #-}
 
-{-|
-Module      : Typecheck
-Description : Semantic analysis, environment tracking, and type inference engine.
-Stability   : experimental
-
-This module implements a robust, pass-based typechecker based on an extended 
-Hindley-Milner (Algorithm W) type inference algorithm. It transforms an untyped
-surface AST ('Ast') into heavily validated semantic constructs, producing a final
-'TypeEnv' or short-circuiting with rich, span-aware errors.
-
-== Architecture Overview
-
-* __Inference Monad ('Infer'):__ 
-    Typehecking operates within a custom 'Infer' monad, a stack of @ExceptT TypeError@ 
-    over @State InferState@. This tracks the supply of fresh type variables ('TVarId'), 
-    a registry of user-defined type aliases ('TypeDeclEnv'), and the current AST 
-    node span to ensure localized error reporting.
-
-* __Type System ('IType'):__
-    Supports primitives (Int, Bool, String, Null), first-class functions ('TFunT'), 
-    arrays ('TArrayT'), and structural record/object types ('TObjectT'). Parametric 
-    polymorphism is supported via standard let-generalization ('Scheme').
-
-* __Unification & Substitution:__
-    Substitution ('Subst') is built compositionally. Unification uses standard 
-    structural equality with an occurs check to prevent infinite types. Note that 
-    object unification currently requires strict field equality (exact structural match)
-    rather than subtyping or row polymorphism.
-
-* __Mutability Tracking:__
-    The 'TypeEnv' tracks not just type schems, but also 'Mutability'. The inference 
-    rules for 'EAssign' explicitly guard against reassigning immutable bindings, 
-    emitting contextual 'NoteHelp' suggestions when violated.
-
-* __Error Handling ('TypeError'):__
-    Errors are designed for modern compiler diagnostics (e.g., in the style of Rust or Elm). 
-    The fail-fast 'ExceptT' model bails on the first unification or binding error, 
-    attaching primary spans ('teSpan'), the failure kind ('teKind'), and secondary 
-    contextual notes ('Note').
-
-== Key Entry Points
-
-* 'inferProgram': Main pipeline entry. Processes a sequence of top-level statements, 
-    populating declarations and producing a final exported 'TypeEnv'.
-* 'inferExprInEmpty': Utility for testing. Infers the type of an 
-    isolated expression against a base prelude environment.
--}
+-- |
+-- Module      : Typecheck
+-- Description : Semantic analysis, environment tracking, and type inference engine.
+-- Stability   : experimental
+--
+-- This module implements a robust, pass-based typechecker based on an extended
+-- Hindley-Milner (Algorithm W) type inference algorithm. It transforms an untyped
+-- surface AST ('Ast') into heavily validated semantic constructs, producing a final
+-- 'TypeEnv' or short-circuiting with rich, span-aware errors.
+--
+-- == Architecture Overview
+--
+-- * __Inference Monad ('Infer'):__
+--     Typehecking operates within a custom 'Infer' monad, a stack of @ExceptT TypeError@
+--     over @State InferState@. This tracks the supply of fresh type variables ('TVarId'),
+--     a registry of user-defined type aliases ('TypeDeclEnv'), and the current AST
+--     node span to ensure localized error reporting.
+--
+-- * __Type System ('IType'):__
+--     Supports primitives (Int, Bool, String, Null), first-class functions ('TFunT'),
+--     arrays ('TArrayT'), and structural record/object types ('TObjectT'). Parametric
+--     polymorphism is supported via standard let-generalization ('Scheme').
+--
+-- * __Unification & Substitution:__
+--     Substitution ('Subst') is built compositionally. Unification uses standard
+--     structural equality with an occurs check to prevent infinite types. Note that
+--     object unification currently requires strict field equality (exact structural match)
+--     rather than subtyping or row polymorphism.
+--
+-- * __Mutability Tracking:__
+--     The 'TypeEnv' tracks not just type schems, but also 'Mutability'. The inference
+--     rules for 'EAssign' explicitly guard against reassigning immutable bindings,
+--     emitting contextual 'NoteHelp' suggestions when violated.
+--
+-- * __Error Handling ('TypeError'):__
+--     Errors are designed for modern compiler diagnostics (e.g., in the style of Rust or Elm).
+--     The fail-fast 'ExceptT' model bails on the first unification or binding error,
+--     attaching primary spans ('teSpan'), the failure kind ('teKind'), and secondary
+--     contextual notes ('Note').
+--
+-- == Key Entry Points
+--
+-- * 'inferProgram': Main pipeline entry. Processes a sequence of top-level statements,
+--     populating declarations and producing a final exported 'TypeEnv'.
+-- * 'inferExprInEmpty': Utility for testing. Infers the type of an
+--     isolated expression against a base prelude environment.
 module Typecheck
   ( TypeError (..),
     TypeErrorKind (..),
@@ -64,7 +63,7 @@ module Typecheck
 where
 
 import Ast
-import Control.Monad (foldM, when, unless)
+import Control.Monad (foldM, unless, when)
 import Control.Monad.Except
 import Control.Monad.State
 import qualified Data.Map.Strict as M
@@ -159,15 +158,19 @@ instance Types TypeEnv where
 
 -- | A rich type error with source location and contextual notes.
 data TypeError = TypeError
-  { teSpan  :: Maybe Span     -- ^ primary error location
-  , teKind  :: TypeErrorKind  -- ^ what went wrong
-  , teNotes :: [Note]         -- ^ secondary explanations
+  { -- | primary error location
+    teSpan :: Maybe Span,
+    -- | what went wrong
+    teKind :: TypeErrorKind,
+    -- | secondary explanations
+    teNotes :: [Note]
   }
   deriving (Eq, Show)
 
 -- | Classification of type errors.
 data TypeErrorKind
-  = TypeMismatch IType IType          -- ^ (found, expected)
+  = -- | (found, expected)
+    TypeMismatch IType IType
   | InfiniteType TVarId IType
   | UnboundVariable Text
   | MissingField Text
@@ -175,22 +178,33 @@ data TypeErrorKind
   | ImmutableAssign Text
   | UnboundType Text
   | DuplicateType Text
-  | TypeArityMismatch Text Int Int    -- ^ name, expected arity, got
-  | NonExhaustiveMatch Text [Text]    -- ^ enum name, missing variants
-  | UnknownVariant Text Text          -- ^ enum name, variant name
-  | UnknownEnum Text                  -- ^ enum name
-  | VariantArityMismatch Text Text Int Int  -- ^ enum, variant, expected, got
-  | ModuleNotFound Text                     -- ^ unresolved relative import path
-  | UnboundImport Text Text                 -- ^ imported name, module path
-  | CircularImport [Text]                   -- ^ cycle of module paths
+  | -- | name, expected arity, got
+    TypeArityMismatch Text Int Int
+  | -- | enum name, missing variants
+    NonExhaustiveMatch Text [Text]
+  | -- | enum name, variant name
+    UnknownVariant Text Text
+  | -- | enum name
+    UnknownEnum Text
+  | -- | enum, variant, expected, got
+    VariantArityMismatch Text Text Int Int
+  | -- | unresolved relative import path
+    ModuleNotFound Text
+  | -- | imported name, module path
+    UnboundImport Text Text
+  | -- | cycle of module paths
+    CircularImport [Text]
   | OtherError Text
   deriving (Eq, Show)
 
 -- | Additional notes attached to a type error.
 data Note
-  = NoteText Text                     -- ^ plain @note:@ line
-  | NoteHelp Text                     -- ^ @help:@ suggestion
-  | NoteSpan Span Text                -- ^ secondary source location with message
+  = -- | plain @note:@ line
+    NoteText Text
+  | -- | @help:@ suggestion
+    NoteHelp Text
+  | -- | secondary source location with message
+    NoteSpan Span Text
   deriving (Eq, Show)
 
 -- | Registered type aliases: name → (type parameters, body)
@@ -204,11 +218,13 @@ data VariantSig = VariantSig Name [Type]
 type EnumDeclEnv = M.Map Text ([Name], [VariantSig])
 
 data InferState = InferState
-  { count       :: Int
-  , typeDecls   :: TypeDeclEnv
-  , enumDecls   :: EnumDeclEnv
-  , currentSpan :: Maybe Span    -- ^ span of the AST node currently being analysed
-  , tyVarBinds  :: M.Map Name IType  -- ^ explicit type variable bindings (from generic functions)
+  { count :: Int,
+    typeDecls :: TypeDeclEnv,
+    enumDecls :: EnumDeclEnv,
+    -- | span of the AST node currently being analysed
+    currentSpan :: Maybe Span,
+    -- | explicit type variable bindings (from generic functions)
+    tyVarBinds :: M.Map Name IType
   }
 
 newtype Infer a = Infer {unInfer :: ExceptT TypeError (State InferState) a}
@@ -229,9 +245,9 @@ fresh = do
 withCurrentSpan :: Span -> Infer a -> Infer a
 withCurrentSpan sp m = do
   old <- gets currentSpan
-  modify' (\s -> s { currentSpan = Just sp })
+  modify' (\s -> s {currentSpan = Just sp})
   result <- m
-  modify' (\s -> s { currentSpan = old })
+  modify' (\s -> s {currentSpan = old})
   pure result
 
 -- | Throw a 'TypeError' using the current span stored in 'InferState'.
@@ -294,13 +310,13 @@ substSurfaceType :: M.Map Name Type -> Type -> Type
 substSurfaceType m = go
   where
     go = \case
-      TVar n      -> M.findWithDefault (TVar n) n m
-      TApp n [] | Just t <- M.lookup n m -> t   -- type parameter (uppercase)
-      TArray t    -> TArray (go t)
-      TObject fs  -> TObject [(k, go v) | (k, v) <- fs]
-      TApp n as   -> TApp n (map go as)
-      TFun as r   -> TFun (map go as) (go r)
-      t           -> t  -- TInt, TBool, TString pass through
+      TVar n -> M.findWithDefault (TVar n) n m
+      TApp n [] | Just t <- M.lookup n m -> t -- type parameter (uppercase)
+      TArray t -> TArray (go t)
+      TObject fs -> TObject [(k, go v) | (k, v) <- fs]
+      TApp n as -> TApp n (map go as)
+      TFun as r -> TFun (map go as) (go r)
+      t -> t -- TInt, TBool, TString pass through
 
 fromSurfaceType :: Type -> Infer IType
 fromSurfaceType = \case
@@ -316,7 +332,7 @@ fromSurfaceType = \case
     -- Check explicit type variable bindings first (from generic function decls)
     binds <- gets tyVarBinds
     case M.lookup n binds of
-      Just itype | null args -> pure itype  -- return pre-allocated TV
+      Just itype | null args -> pure itype -- return pre-allocated TV
       _ -> do
         decls <- gets typeDecls
         enums <- gets enumDecls
@@ -341,15 +357,15 @@ fromSurfaceType = \case
 -- substitution maps during enum instantiation.
 toSurfaceType :: IType -> Type
 toSurfaceType = \case
-  TV n       -> TVar (T.pack ("_tv" <> show n))
-  TIntT      -> TInt
-  TBoolT     -> TBool
-  TStringT   -> TString
-  TNullT     -> TVar "_null"   -- no surface Null type; use a placeholder
+  TV n -> TVar (T.pack ("_tv" <> show n))
+  TIntT -> TInt
+  TBoolT -> TBool
+  TStringT -> TString
+  TNullT -> TVar "_null" -- no surface Null type; use a placeholder
   TFunT as r -> TFun (map toSurfaceType as) (toSurfaceType r)
-  TArrayT t  -> TArray (toSurfaceType t)
+  TArrayT t -> TArray (toSurfaceType t)
   TObjectT fs -> TObject [(k, toSurfaceType v) | (k, v) <- M.toList fs]
-  TCon n ts  -> TApp n (map toSurfaceType ts)
+  TCon n ts -> TApp n (map toSurfaceType ts)
 
 -- | Resolve the scrutinee type of a match expression to its enum declaration.
 -- Returns (enumName, typeParams, variantSigs, concreteTypeArgs).
@@ -388,15 +404,12 @@ inferExpr env (Located sp expr) = withCurrentSpan sp $ case expr of
     case M.lookup x env of
       Nothing -> throwError (TypeError (Just sp) (UnboundVariable x) [])
       Just (sch, _) -> do t <- instantiate sch; pure (emptySubst, t)
-
   ELit l -> case l of
     LInt _ -> pure (emptySubst, TIntT)
     LBool _ -> pure (emptySubst, TBoolT)
     LString _ -> pure (emptySubst, TStringT)
     LNull -> pure (emptySubst, TNullT)
-
   EParens e -> inferExpr env e
-
   EArray es -> do
     tv <- fresh
     (s, ts) <- inferList env es
@@ -409,7 +422,6 @@ inferExpr env (Located sp expr) = withCurrentSpan sp $ case expr of
         s
         ts
     pure (s', apply s' (TArrayT tv))
-
   EObject fs -> do
     (s, typed) <- foldM step (emptySubst, []) fs
     pure (s, TObjectT (M.fromList typed))
@@ -418,7 +430,6 @@ inferExpr env (Located sp expr) = withCurrentSpan sp $ case expr of
         (sE, tE) <- inferExpr (apply sAcc env) e
         let sAll = compose sE sAcc
         pure (sAll, out <> [(k, apply sAll tE)])
-
   ELam params mRet body -> do
     -- build parameter types
     (env', ptys) <- foldM addParam (env, []) params
@@ -437,7 +448,6 @@ inferExpr env (Located sp expr) = withCurrentSpan sp $ case expr of
       addParam (e, ts) (Param n mt) = do
         t <- maybe fresh fromSurfaceType mt
         pure (M.insert n (Forall [] t, Immutable) e, ts <> [t])
-
   ECall fn args -> do
     (sFn, tFn) <- inferExpr env fn
     (sArgs, argTs) <- inferArgList (apply sFn env) args
@@ -445,7 +455,6 @@ inferExpr env (Located sp expr) = withCurrentSpan sp $ case expr of
     sCall <- unify (TFunT argTs ret) (apply sArgs tFn)
     let sAll = compose sCall (compose sArgs sFn)
     pure (sAll, apply sAll ret)
-
   EMember obj field -> do
     (sObj, tObj0) <- inferExpr env obj
     let tObj = apply sObj tObj0
@@ -460,7 +469,6 @@ inferExpr env (Located sp expr) = withCurrentSpan sp $ case expr of
         sField <- unify tObj (TObjectT (M.singleton field tv))
         let sAll = compose sField sObj
         pure (sAll, apply sAll tv)
-
   EIndex arr ix -> do
     (s1, tArr) <- inferExpr env arr
     (s2, tIx) <- inferExpr (apply s1 env) ix
@@ -469,22 +477,24 @@ inferExpr env (Located sp expr) = withCurrentSpan sp $ case expr of
     sArr <- unify (apply sIx tArr) (TArrayT tv)
     let sAll = compose sArr (compose sIx (compose s2 s1))
     pure (sAll, apply sAll tv)
-
   EAssign l r -> do
     -- Guard: only mutable bindings may be assigned to
     case locVal l of
       EVar x -> case M.lookup x env of
         Just (_, Immutable) ->
-          throwError (TypeError (Just sp) (ImmutableAssign x)
-            [NoteHelp ("consider making `" <> x <> "` mutable: `let mut " <> x <> " = ...`")])
+          throwError
+            ( TypeError
+                (Just sp)
+                (ImmutableAssign x)
+                [NoteHelp ("consider making `" <> x <> "` mutable: `let mut " <> x <> " = ...`")]
+            )
         _ -> pure ()
-      _ -> pure ()  -- member/index assigns are permitted
+      _ -> pure () -- member/index assigns are permitted
     (s1, tl) <- inferExpr env l
     (s2, tr) <- inferExpr (apply s1 env) r
     s3 <- unify (apply s2 tl) tr
     let sAll = compose s3 (compose s2 s1)
     pure (sAll, apply sAll tr)
-
   EUnary op e -> do
     (s, t) <- inferExpr env e
     case op of
@@ -494,7 +504,6 @@ inferExpr env (Located sp expr) = withCurrentSpan sp $ case expr of
       Not -> do
         s' <- unify t TBoolT
         pure (compose s' s, TBoolT)
-
   EBinary op a b -> do
     (s1, ta) <- inferExpr env a
     (s2, tb) <- inferExpr (apply s1 env) b
@@ -520,7 +529,7 @@ inferExpr env (Located sp expr) = withCurrentSpan sp $ case expr of
         let sAll = compose sB (compose sA s)
         pure (sAll, ret)
 
-      -- | The '+' operator supports both Int + Int -> Int and String + String -> String.
+      -- \| The '+' operator supports both Int + Int -> Int and String + String -> String.
       -- If either operand is known to be a String, unify both as String.
       addOp ta tb s = do
         let ta' = apply s ta
@@ -547,7 +556,6 @@ inferExpr env (Located sp expr) = withCurrentSpan sp $ case expr of
       eqBool ta tb s = do
         sA <- unify (apply s ta) (apply s tb)
         pure (compose sA s, TBoolT)
-
   EIfExpr c t f -> do
     (s1, tc) <- inferExpr env c
     sBool <- unify tc TBoolT
@@ -558,31 +566,41 @@ inferExpr env (Located sp expr) = withCurrentSpan sp $ case expr of
     let sAll = compose s4 (compose s3 (compose s2 s1'))
     pure (sAll, apply sAll tf)
 
-  -- | Variant constructor: EnumName::VariantName(args)
+  -- \| Variant constructor: EnumName::VariantName(args)
   EVariant enumName varName args -> do
     (realEnumName, tyParams, variants) <- resolveEnumByName enumName
     case lookup varName [(vn, vf) | VariantSig vn vf <- variants] of
       Nothing -> throwSpanned (UnknownVariant realEnumName varName) []
       Just fieldSurfTypes -> do
         when (length args /= length fieldSurfTypes) $
-          throwSpanned (VariantArityMismatch realEnumName varName
-            (length fieldSurfTypes) (length args)) []
+          throwSpanned
+            ( VariantArityMismatch
+                realEnumName
+                varName
+                (length fieldSurfTypes)
+                (length args)
+            )
+            []
         -- Generate fresh type variables for the enum's type parameters
         freshTyArgs <- mapM (const fresh) tyParams
         let substMap = M.fromList (zip tyParams (map toSurfaceType freshTyArgs))
             instFields = map (substSurfaceType substMap) fieldSurfTypes
         -- Infer each argument and unify with the instantiated field type
-        (sArgs, _) <- foldM (\(sAcc, idx) (arg, surfTy) -> do
-          (sA, tA) <- inferExpr (apply sAcc env) arg
-          iTy <- fromSurfaceType surfTy
-          sU <- unify (apply sA tA) (apply sA iTy)
-          let sAll = compose sU (compose sA sAcc)
-          pure (sAll, idx + 1)
-          ) (emptySubst, 0 :: Int) (zip args instFields)
+        (sArgs, _) <-
+          foldM
+            ( \(sAcc, idx) (arg, surfTy) -> do
+                (sA, tA) <- inferExpr (apply sAcc env) arg
+                iTy <- fromSurfaceType surfTy
+                sU <- unify (apply sA tA) (apply sA iTy)
+                let sAll = compose sU (compose sA sAcc)
+                pure (sAll, idx + 1)
+            )
+            (emptySubst, 0 :: Int)
+            (zip args instFields)
         let resultType = TCon realEnumName (map (apply sArgs) freshTyArgs)
         pure (sArgs, resultType)
 
-  -- | Match expression: match (scrutinee) { arms }
+  -- \| Match expression: match (scrutinee) { arms }
   EMatch scrut arms -> do
     (sScrut, tScrut) <- inferExpr env scrut
     -- Determine the enum being matched
@@ -594,39 +612,58 @@ inferExpr env (Located sp expr) = withCurrentSpan sp $ case expr of
         paramSubst = M.fromList (zip tyParams tyArgSurface)
     -- Infer each arm
     retTv <- fresh
-    (sFinal, coveredVariants) <- foldM (\(sAcc, covered) (MatchArm pat body) -> do
-      case pat of
-        PWild -> do
-          (sBody, tBody) <- inferExpr (apply sAcc env) body
-          sRet <- unify (apply sBody tBody) (apply sBody (apply sAcc retTv))
-          let sAll = compose sRet (compose sBody sAcc)
-          -- Wildcard covers all remaining variants
-          let allNames = S.fromList [vn | VariantSig vn _ <- variants]
-          pure (sAll, S.union covered allNames)
-        PVariant pEnum pVar bindings -> do
-          (realPEnum, _, _) <- resolveEnumByName pEnum
-          when (realPEnum /= enumName) $
-            throwSpanned (OtherError ("pattern matches on `" <> pEnum
-              <> "` but scrutinee is of type `" <> enumName <> "`")) []
-          case lookup pVar [(vn, vf) | VariantSig vn vf <- variants] of
-            Nothing -> throwSpanned (UnknownVariant enumName pVar) []
-            Just fieldSurfTypes -> do
-              when (length bindings /= length fieldSurfTypes) $
-                throwSpanned (VariantArityMismatch enumName pVar
-                  (length fieldSurfTypes) (length bindings)) []
-              -- Instantiate field types
-              let instFields = map (substSurfaceType paramSubst) fieldSurfTypes
-              fieldITypes <- mapM fromSurfaceType instFields
-              -- Extend environment with pattern bindings
-              let envWithBindings = foldl
-                    (\e (n, t) -> M.insert n (Forall [] (apply sAcc t), Immutable) e)
-                    (apply sAcc env)
-                    (zip bindings fieldITypes)
-              (sBody, tBody) <- inferExpr envWithBindings body
-              sRet <- unify (apply sBody tBody) (apply sBody (apply sAcc retTv))
-              let sAll = compose sRet (compose sBody sAcc)
-              pure (sAll, S.insert pVar covered)
-      ) (sScrut, S.empty) arms
+    (sFinal, coveredVariants) <-
+      foldM
+        ( \(sAcc, covered) (MatchArm pat body) -> do
+            case pat of
+              PWild -> do
+                (sBody, tBody) <- inferExpr (apply sAcc env) body
+                sRet <- unify (apply sBody tBody) (apply sBody (apply sAcc retTv))
+                let sAll = compose sRet (compose sBody sAcc)
+                -- Wildcard covers all remaining variants
+                let allNames = S.fromList [vn | VariantSig vn _ <- variants]
+                pure (sAll, S.union covered allNames)
+              PVariant pEnum pVar bindings -> do
+                (realPEnum, _, _) <- resolveEnumByName pEnum
+                when (realPEnum /= enumName) $
+                  throwSpanned
+                    ( OtherError
+                        ( "pattern matches on `"
+                            <> pEnum
+                            <> "` but scrutinee is of type `"
+                            <> enumName
+                            <> "`"
+                        )
+                    )
+                    []
+                case lookup pVar [(vn, vf) | VariantSig vn vf <- variants] of
+                  Nothing -> throwSpanned (UnknownVariant enumName pVar) []
+                  Just fieldSurfTypes -> do
+                    when (length bindings /= length fieldSurfTypes) $
+                      throwSpanned
+                        ( VariantArityMismatch
+                            enumName
+                            pVar
+                            (length fieldSurfTypes)
+                            (length bindings)
+                        )
+                        []
+                    -- Instantiate field types
+                    let instFields = map (substSurfaceType paramSubst) fieldSurfTypes
+                    fieldITypes <- mapM fromSurfaceType instFields
+                    -- Extend environment with pattern bindings
+                    let envWithBindings =
+                          foldl
+                            (\e (n, t) -> M.insert n (Forall [] (apply sAcc t), Immutable) e)
+                            (apply sAcc env)
+                            (zip bindings fieldITypes)
+                    (sBody, tBody) <- inferExpr envWithBindings body
+                    sRet <- unify (apply sBody tBody) (apply sBody (apply sAcc retTv))
+                    let sAll = compose sRet (compose sBody sAcc)
+                    pure (sAll, S.insert pVar covered)
+        )
+        (sScrut, S.empty)
+        arms
     -- Exhaustiveness check
     let allVariantNames = S.fromList [vn | VariantSig vn _ <- variants]
         missing = S.toList (S.difference allVariantNames coveredVariants)
@@ -650,7 +687,6 @@ inferStmt env (Located sp stmt) = withCurrentSpan sp $ case stmt of
   SExpr e -> do
     (s, _) <- inferExpr env e
     pure (s, apply s env)
-
   SLet mut name mTy rhs -> do
     when (M.member name env) $
       throwError (TypeError (Just sp) (DuplicateBinding name) [])
@@ -666,11 +702,9 @@ inferStmt env (Located sp stmt) = withCurrentSpan sp $ case stmt of
         tFinal = apply sAll tRhs
         sch = generalize env' tFinal
     pure (sAll, M.insert name (sch, mut) env')
-
   SReturn _ ->
     -- Statement-level return checking can be made function-context-sensitive later.
     pure (emptySubst, env)
-
   SIf cond th el -> do
     (s1, tCond) <- inferExpr env cond
     sCond <- unify tCond TBoolT
@@ -682,65 +716,66 @@ inferStmt env (Located sp stmt) = withCurrentSpan sp $ case stmt of
     let sAll = compose sEl (compose sTh sBase)
         envMerged = envEl
     pure (sAll, envMerged)
-
   SWhile cond body -> do
     (s1, tCond) <- inferExpr env cond
     s2 <- unify tCond TBoolT
     (s3, env') <- inferBlock (apply (compose s2 s1) env) body
     pure (compose s3 (compose s2 s1), env')
-
   SBlock b -> inferBlock env b
-
   STypeDecl name params body -> do
     decls <- gets typeDecls
     when (M.member name decls) $
       throwError (TypeError (Just sp) (DuplicateType name) [])
-    modify' (\s -> s { typeDecls = M.insert name (params, body) decls })
+    modify' (\s -> s {typeDecls = M.insert name (params, body) decls})
     pure (emptySubst, env)
-
   SEnum name tyParams variants -> do
     enums <- gets enumDecls
     when (M.member name enums) $
       throwError (TypeError (Just sp) (DuplicateType name) [])
     -- Register the enum
     let vsigs = [VariantSig vn vf | Variant vn vf <- variants]
-    modify' (\s -> s { enumDecls = M.insert name (tyParams, vsigs) enums })
+    modify' (\s -> s {enumDecls = M.insert name (tyParams, vsigs) enums})
     -- Inject constructor functions into the type environment
-    envOut <- foldM (\envAcc (Variant vn vfields) -> do
-      -- Generate fresh type variables for the enum's type params
-      freshTyArgs <- mapM (const fresh) tyParams
-      let qualName = name <> "::" <> vn
-          enumIType = TCon name freshTyArgs
-      if null vfields
-        then do
-          -- Unit variant: just the enum type (polymorphic)
-          let envFtv = S.unions [ftv sch | (sch, _) <- M.elems envAcc]
-              vars = S.toList (ftv enumIType `S.difference` envFtv)
-          pure (M.insert qualName (Forall vars enumIType, Immutable) envAcc)
-        else do
-          -- Variant with fields: function type
-          let substMap = M.fromList (zip tyParams (map toSurfaceType freshTyArgs))
-              instFields = map (substSurfaceType substMap) vfields
-          fieldITypes <- mapM fromSurfaceType instFields
-          let funTy = TFunT fieldITypes enumIType
-              envFtv = S.unions [ftv sch | (sch, _) <- M.elems envAcc]
-              vars = S.toList (ftv funTy `S.difference` envFtv)
-          pure (M.insert qualName (Forall vars funTy, Immutable) envAcc)
-      ) env variants
+    envOut <-
+      foldM
+        ( \envAcc (Variant vn vfields) -> do
+            -- Generate fresh type variables for the enum's type params
+            freshTyArgs <- mapM (const fresh) tyParams
+            let qualName = name <> "::" <> vn
+                enumIType = TCon name freshTyArgs
+            if null vfields
+              then do
+                -- Unit variant: just the enum type (polymorphic)
+                let envFtv = S.unions [ftv sch | (sch, _) <- M.elems envAcc]
+                    vars = S.toList (ftv enumIType `S.difference` envFtv)
+                pure (M.insert qualName (Forall vars enumIType, Immutable) envAcc)
+              else do
+                -- Variant with fields: function type
+                let substMap = M.fromList (zip tyParams (map toSurfaceType freshTyArgs))
+                    instFields = map (substSurfaceType substMap) vfields
+                fieldITypes <- mapM fromSurfaceType instFields
+                let funTy = TFunT fieldITypes enumIType
+                    envFtv = S.unions [ftv sch | (sch, _) <- M.elems envAcc]
+                    vars = S.toList (ftv funTy `S.difference` envFtv)
+                pure (M.insert qualName (Forall vars funTy, Immutable) envAcc)
+        )
+        env
+        variants
     pure (emptySubst, envOut)
 
-  -- | 'export' is purely a resolver-level visibility marker; typechecking
+  -- \| 'export' is purely a resolver-level visibility marker; typechecking
   -- delegates straight through to the wrapped declaration.
   SExport inner -> inferStmt env inner
-
-  -- | By the time a flattened program reaches the typechecker, the module
+  -- \| By the time a flattened program reaches the typechecker, the module
   -- resolver has already consumed every 'SImport' and replaced it with
   -- forwarding declarations. A surviving 'SImport' means the resolver was
   -- bypassed (e.g. a nested import, or 'inferProgram' called directly).
   SImport _ path ->
-    throwSpanned (OtherError
-      ("cannot resolve import of `" <> path <> "` outside the module resolver")) []
-
+    throwSpanned
+      ( OtherError
+          ("cannot resolve import of `" <> path <> "` outside the module resolver")
+      )
+      []
   SFun name tyParams params mRet body -> do
     -- Create fresh type variables for declared type parameters (e.g., <Msg>)
     -- and temporarily register them so fromSurfaceType resolves TApp "Msg" []
@@ -748,7 +783,7 @@ inferStmt env (Located sp stmt) = withCurrentSpan sp $ case stmt of
     freshTyVars <- mapM (const fresh) tyParams
     let newBinds = M.fromList (zip tyParams freshTyVars)
     oldBinds <- gets tyVarBinds
-    modify' (\s -> s { tyVarBinds = M.union newBinds (tyVarBinds s) })
+    modify' (\s -> s {tyVarBinds = M.union newBinds (tyVarBinds s)})
 
     paramTypes <- mapM (\(Param _ mt) -> maybe fresh fromSurfaceType mt) params
     retType <- maybe fresh fromSurfaceType mRet
@@ -763,7 +798,7 @@ inferStmt env (Located sp stmt) = withCurrentSpan sp $ case stmt of
     (sBody, _) <- inferBlockWithRet (Just retType) envParams body
 
     -- Restore tyVarBinds
-    modify' (\s -> s { tyVarBinds = oldBinds })
+    modify' (\s -> s {tyVarBinds = oldBinds})
 
     let funTypeFinal = apply sBody funType
         envApplied = apply sBody env
@@ -787,10 +822,8 @@ inferStmtWithRet mRet env (Located sp stmt) = withCurrentSpan sp $ case stmt of
         s2 <- unify (apply s1 te) (apply s1 rt)
         let sAll = compose s2 s1
         pure (sAll, apply sAll env)
-
   SBlock b ->
     inferBlockWithRet mRet env b
-
   SIf cond th el -> do
     (s1, tCond) <- inferExpr env cond
     sCond <- unify tCond TBoolT
@@ -801,7 +834,6 @@ inferStmtWithRet mRet env (Located sp stmt) = withCurrentSpan sp $ case stmt of
       Just b -> inferBlockWithRet mRet envTh b
     let sAll = compose sEl (compose sTh sBase)
     pure (sAll, apply sAll envEl)
-
   SWhile cond body -> do
     (s1, tCond) <- inferExpr env cond
     s2 <- unify tCond TBoolT
@@ -810,7 +842,6 @@ inferStmtWithRet mRet env (Located sp stmt) = withCurrentSpan sp $ case stmt of
 
   -- defer to existing behavior for others
   other -> inferStmt env (Located sp other)
-
 
 inferBlockWithRet :: Maybe IType -> TypeEnv -> Block -> Infer (Subst, TypeEnv)
 inferBlockWithRet mRet env (Block ss) =
@@ -846,5 +877,10 @@ preludeEnv :: TypeEnv
 preludeEnv =
   M.fromList
     [ ("print", (Forall [0] (TFunT [TV 0] TNullT), Immutable)),
-      ("toString", (Forall [1] (TFunT [TV 1] TStringT), Immutable))
+      ("toString", (Forall [1] (TFunT [TV 1] TStringT), Immutable)),
+      -- Boots an the application via the JS runtime's
+      -- TypedJS.app (see runtime/fractum_runtime.js). Left weakly typed
+      -- like print/toString above; the config's init/update/view fields
+      -- are still fully checked wherever they are defined and used.
+      ("app", (Forall [2] (TFunT [TV 2] TNullT), Immutable))
     ]

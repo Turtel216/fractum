@@ -1,0 +1,31 @@
+// ==========================================
+// Option.tjs
+// Optional Values
+// ==========================================
+//
+// Option<T> represents a value that may or may not be present. It replaces
+// null/undefined at the boundary with the outside world (see Dom.tjs), and
+// composes cleanly with pattern matching.
+
+export enum Option<T> {
+    Some(T),
+    None,
+}
+
+// ---------------------------------------------------------
+// Helper Functions
+// ---------------------------------------------------------
+
+export function option_map<A, B>(opt: Option<A>, f: (A) -> B): Option<B> {
+    return match (opt) {
+        Option::Some(v) => Option::Some(f(v)),
+        Option::None => Option::None,
+    };
+}
+
+export function option_unwrap_or<T>(opt: Option<T>, fallback: T): T {
+    return match (opt) {
+        Option::Some(v) => v,
+        Option::None => fallback,
+    };
+}
