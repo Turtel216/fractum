@@ -180,6 +180,9 @@ data TypeErrorKind
   | UnknownVariant Text Text          -- ^ enum name, variant name
   | UnknownEnum Text                  -- ^ enum name
   | VariantArityMismatch Text Text Int Int  -- ^ enum, variant, expected, got
+  | ModuleNotFound Text                     -- ^ unresolved relative import path
+  | UnboundImport Text Text                 -- ^ imported name, module path
+  | CircularImport [Text]                   -- ^ cycle of module paths
   | OtherError Text
   deriving (Eq, Show)
 
@@ -359,6 +362,26 @@ resolveEnumType (TCon name tyArgs) = do
 resolveEnumType t =
   throwSpanned (OtherError ("expected enum type in match, found `" <> T.pack (show t) <> "`")) []
 
+-- | Resolve an enum referenced by its literal source name (as written by the
+-- user in @EnumName::Variant@ or a pattern), following at most one level of
+-- type-alias indirection. This lets an imported enum, re-exposed locally as a
+-- trivial forwarding @type Local = Target<...>@ alias, still be constructed
+-- and matched on under its local name.
+resolveEnumByName :: Name -> Infer (Name, [Name], [VariantSig])
+resolveEnumByName name = do
+  enums <- gets enumDecls
+  case M.lookup name enums of
+    Just (tyParams, variants) -> pure (name, tyParams, variants)
+    Nothing -> do
+      decls <- gets typeDecls
+      case M.lookup name decls of
+        Just (_, TApp target _) -> do
+          enums' <- gets enumDecls
+          case M.lookup target enums' of
+            Just (tyParams, variants) -> pure (target, tyParams, variants)
+            Nothing -> throwSpanned (UnknownEnum name) []
+        _ -> throwSpanned (UnknownEnum name) []
+
 inferExpr :: TypeEnv -> LExpr -> Infer (Subst, IType)
 inferExpr env (Located sp expr) = withCurrentSpan sp $ case expr of
   EVar x ->
@@ -537,30 +560,27 @@ inferExpr env (Located sp expr) = withCurrentSpan sp $ case expr of
 
   -- | Variant constructor: EnumName::VariantName(args)
   EVariant enumName varName args -> do
-    enums <- gets enumDecls
-    case M.lookup enumName enums of
-      Nothing -> throwSpanned (UnknownEnum enumName) []
-      Just (tyParams, variants) -> do
-        case lookup varName [(vn, vf) | VariantSig vn vf <- variants] of
-          Nothing -> throwSpanned (UnknownVariant enumName varName) []
-          Just fieldSurfTypes -> do
-            when (length args /= length fieldSurfTypes) $
-              throwSpanned (VariantArityMismatch enumName varName
-                (length fieldSurfTypes) (length args)) []
-            -- Generate fresh type variables for the enum's type parameters
-            freshTyArgs <- mapM (const fresh) tyParams
-            let substMap = M.fromList (zip tyParams (map toSurfaceType freshTyArgs))
-                instFields = map (substSurfaceType substMap) fieldSurfTypes
-            -- Infer each argument and unify with the instantiated field type
-            (sArgs, _) <- foldM (\(sAcc, idx) (arg, surfTy) -> do
-              (sA, tA) <- inferExpr (apply sAcc env) arg
-              iTy <- fromSurfaceType surfTy
-              sU <- unify (apply sA tA) (apply sA iTy)
-              let sAll = compose sU (compose sA sAcc)
-              pure (sAll, idx + 1)
-              ) (emptySubst, 0 :: Int) (zip args instFields)
-            let resultType = TCon enumName (map (apply sArgs) freshTyArgs)
-            pure (sArgs, resultType)
+    (realEnumName, tyParams, variants) <- resolveEnumByName enumName
+    case lookup varName [(vn, vf) | VariantSig vn vf <- variants] of
+      Nothing -> throwSpanned (UnknownVariant realEnumName varName) []
+      Just fieldSurfTypes -> do
+        when (length args /= length fieldSurfTypes) $
+          throwSpanned (VariantArityMismatch realEnumName varName
+            (length fieldSurfTypes) (length args)) []
+        -- Generate fresh type variables for the enum's type parameters
+        freshTyArgs <- mapM (const fresh) tyParams
+        let substMap = M.fromList (zip tyParams (map toSurfaceType freshTyArgs))
+            instFields = map (substSurfaceType substMap) fieldSurfTypes
+        -- Infer each argument and unify with the instantiated field type
+        (sArgs, _) <- foldM (\(sAcc, idx) (arg, surfTy) -> do
+          (sA, tA) <- inferExpr (apply sAcc env) arg
+          iTy <- fromSurfaceType surfTy
+          sU <- unify (apply sA tA) (apply sA iTy)
+          let sAll = compose sU (compose sA sAcc)
+          pure (sAll, idx + 1)
+          ) (emptySubst, 0 :: Int) (zip args instFields)
+        let resultType = TCon realEnumName (map (apply sArgs) freshTyArgs)
+        pure (sArgs, resultType)
 
   -- | Match expression: match (scrutinee) { arms }
   EMatch scrut arms -> do
@@ -584,7 +604,8 @@ inferExpr env (Located sp expr) = withCurrentSpan sp $ case expr of
           let allNames = S.fromList [vn | VariantSig vn _ <- variants]
           pure (sAll, S.union covered allNames)
         PVariant pEnum pVar bindings -> do
-          when (pEnum /= enumName) $
+          (realPEnum, _, _) <- resolveEnumByName pEnum
+          when (realPEnum /= enumName) $
             throwSpanned (OtherError ("pattern matches on `" <> pEnum
               <> "` but scrutinee is of type `" <> enumName <> "`")) []
           case lookup pVar [(vn, vf) | VariantSig vn vf <- variants] of
@@ -707,6 +728,18 @@ inferStmt env (Located sp stmt) = withCurrentSpan sp $ case stmt of
           pure (M.insert qualName (Forall vars funTy, Immutable) envAcc)
       ) env variants
     pure (emptySubst, envOut)
+
+  -- | 'export' is purely a resolver-level visibility marker; typechecking
+  -- delegates straight through to the wrapped declaration.
+  SExport inner -> inferStmt env inner
+
+  -- | By the time a flattened program reaches the typechecker, the module
+  -- resolver has already consumed every 'SImport' and replaced it with
+  -- forwarding declarations. A surviving 'SImport' means the resolver was
+  -- bypassed (e.g. a nested import, or 'inferProgram' called directly).
+  SImport _ path ->
+    throwSpanned (OtherError
+      ("cannot resolve import of `" <> path <> "` outside the module resolver")) []
 
   SFun name tyParams params mRet body -> do
     -- Create fresh type variables for declared type parameters (e.g., <Msg>)

@@ -79,6 +79,9 @@ errorCode = \case
   UnknownVariant {} -> "E0011"
   UnknownEnum {} -> "E0012"
   VariantArityMismatch {} -> "E0013"
+  ModuleNotFound {} -> "E0014"
+  UnboundImport {} -> "E0015"
+  CircularImport {} -> "E0016"
   OtherError {} -> "E0099"
 
 -- | Short human-readable title for the error kind.
@@ -97,6 +100,9 @@ errorTitle = \case
   UnknownVariant {} -> "unknown variant"
   UnknownEnum {} -> "unknown enum"
   VariantArityMismatch {} -> "wrong number of variant fields"
+  ModuleNotFound {} -> "module not found"
+  UnboundImport {} -> "no exported member"
+  CircularImport {} -> "circular import"
   OtherError {} -> "type error"
 
 -- | Detailed message shown under the source underline.
@@ -143,6 +149,12 @@ errorDetail = \case
       <> " field(s) but "
       <> tshow got
       <> " were given"
+  ModuleNotFound path ->
+    "cannot find module `" <> path <> "`"
+  UnboundImport name path ->
+    "module `" <> path <> "` has no exported member `" <> name <> "`"
+  CircularImport cyclePath ->
+    "modules form a cycle: " <> T.intercalate " -> " cyclePath
   OtherError msg -> msg
 
 -- | Render the coloured header line:  @error[E0001]: type mismatch@
@@ -152,7 +164,7 @@ errorHeader noc kind =
 
 -- | Render a source-line snippet with caret underline and message.
 renderSnippet :: Bool -> Int -> Text -> Span -> Text -> Text
-renderSnippet noc gw src (Span (Pos line col) (Pos endLine endCol)) msg =
+renderSnippet noc gw src (Span _ (Pos line col) (Pos endLine endCol)) msg =
   let srcLines = T.lines src
       lineStr = tshow line
       lineNum = T.justifyRight gw ' ' lineStr
@@ -201,8 +213,13 @@ renderNote noc gw note =
         NoteSpan _ txt -> pad <> blue noc "= " <> bold noc "note: " <> txt <> "\n"
 
 -- | Render a complete, coloured diagnostic string for a 'TypeError'.
-renderDiagnostic :: Bool -> FilePath -> Text -> TypeError -> Text
-renderDiagnostic noc fp src (TypeError mSpan kind notes) =
+--
+-- Takes a map of every source file loaded during compilation (keyed by the
+-- file path recorded on each 'Span') so that an error originating inside an
+-- imported module renders that module's own file and source snippet, not
+-- the entry module's.
+renderDiagnostic :: Bool -> M.Map FilePath Text -> TypeError -> Text
+renderDiagnostic noc srcs (TypeError mSpan kind notes) =
   header
     <> "\n"
     <> locationStr
@@ -210,14 +227,14 @@ renderDiagnostic noc fp src (TypeError mSpan kind notes) =
     <> notesStr
   where
     gutterW = case mSpan of
-      Just (Span (Pos l _) _) -> max 1 (length (show l))
+      Just (Span _ (Pos l _) _) -> max 1 (length (show l))
       Nothing -> 1
 
     header = errorHeader noc kind
 
     locationStr = case mSpan of
       Nothing -> ""
-      Just (Span (Pos l c) _) ->
+      Just (Span fp (Pos l c) _) ->
         T.replicate gutterW " "
           <> blue noc "--> "
           <> T.pack fp
@@ -240,7 +257,8 @@ renderDiagnostic noc fp src (TypeError mSpan kind notes) =
               <> pad
               <> blue noc "|"
               <> "\n"
-      Just sp -> renderSnippet noc gutterW src sp (errorDetail kind)
+      Just sp@(Span fp _ _) ->
+        renderSnippet noc gutterW (M.findWithDefault "" fp srcs) sp (errorDetail kind)
 
     notesStr = T.concat [renderNote noc gutterW n | n <- notes]
 
