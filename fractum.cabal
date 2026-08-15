@@ -64,6 +64,7 @@ test-suite fractum-test
         fractum,
         tasty,
         tasty-golden,
+        tasty-hunit,
         filepath,
         directory,
         typed-process,
