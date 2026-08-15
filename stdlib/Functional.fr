@@ -1,0 +1,326 @@
+// ==========================================
+// Functional.tjs
+// Functional Programming Toolkit
+// ==========================================
+//
+// A general-purpose toolkit for programming in a functional style: function
+// combinators for building pipelines out of small pieces, a Pair type for
+// grouping two values without a bespoke record type, a persistent singly
+// linked List<T> for working with sequences via recursion and pattern
+// matching, and monadic helpers that round out Option<T> and Result<T, E>
+// (see Option.tjs, Result.tjs) with the combinators every FP standard
+// library ships.
+
+import { Option } from "./Option";
+import { Result } from "./Result";
+
+// ---------------------------------------------------------
+// Function Combinators
+// ---------------------------------------------------------
+
+// Returns its argument unchanged. Useful as a default/placeholder callback.
+export function identity<T>(x: T): T {
+    return x;
+}
+
+// Builds a function that always returns x, ignoring its argument.
+export function constant<A, B>(x: A): (B) -> A {
+    return (y) => x;
+}
+
+// Right-to-left function composition: compose(f, g)(x) is f(g(x)).
+export function compose<A, B, C>(f: (B) -> C, g: (A) -> B): (A) -> C {
+    return (x) => f(g(x));
+}
+
+// Left-to-right function composition: pipe(f, g)(x) is g(f(x)).
+// Reads in the order the functions run, which suits long pipelines.
+export function pipe<A, B, C>(f: (A) -> B, g: (B) -> C): (A) -> C {
+    return (x) => g(f(x));
+}
+
+// Swaps the order of a two-argument function's parameters.
+// f is left unannotated because the parser does not yet accept a written
+// two-parameter function type like `(A, B) -> C`; its shape is still fully
+// recovered from how it is called below.
+export function flip(f) {
+    return (b, a) => f(a, b);
+}
+
+// Converts a two-argument function into a chain of two single-argument
+// functions, so it can be partially applied one argument at a time.
+export function curry2<A, B, C>(f): (A) -> (B) -> C {
+    return (a) => (b) => f(a, b);
+}
+
+// The inverse of curry2: turns a chain of single-argument functions back
+// into one function taking both arguments at once.
+export function uncurry2<A, B, C>(f: (A) -> (B) -> C) {
+    return (a, b) => f(a)(b);
+}
+
+// Applies f to x. Occasionally useful where a function value is more
+// convenient to pass around than the call syntax itself.
+export function apply<A, B>(f: (A) -> B, x: A): B {
+    return f(x);
+}
+
+// Runs f for its side effect and returns x unchanged, letting a debug or
+// logging step be spliced into the middle of a pipeline.
+export function tap<T, R>(x: T, f: (T) -> R): T {
+    f(x);
+    return x;
+}
+
+// ---------------------------------------------------------
+// Pair
+// ---------------------------------------------------------
+//
+// A simple, structural way to group two values together without declaring
+// a bespoke record type for it. See list_zip below for a typical use.
+
+export type Pair<A, B> = { first: A, second: B };
+
+export function pair<A, B>(a: A, b: B): Pair<A, B> {
+    return { first: a, second: b };
+}
+
+export function fst<A, B>(p: Pair<A, B>): A {
+    return p.first;
+}
+
+export function snd<A, B>(p: Pair<A, B>): B {
+    return p.second;
+}
+
+// ---------------------------------------------------------
+// List
+// ---------------------------------------------------------
+//
+// A persistent, singly linked list. Unlike the built-in array type, List<T>
+// supports the usual map/filter/fold vocabulary directly, since it can be
+// taken apart with pattern matching instead of needing index/length
+// operations arrays do not yet expose.
+
+export enum List<T> {
+    Cons(T, List<T>),
+    Nil,
+}
+
+// Constructs an empty list. Useful where a fresh List<T> is needed and type
+// inference has nothing else to pin the element type down with.
+export function list_nil<T>(): List<T> {
+    return List::Nil;
+}
+
+// Prepends x to the front of xs.
+export function list_cons<T>(x: T, xs: List<T>): List<T> {
+    return List::Cons(x, xs);
+}
+
+export function list_is_empty<T>(xs: List<T>): Bool {
+    return match (xs) {
+        List::Nil => true,
+        List::Cons(head, tail) => false,
+    };
+}
+
+export function list_length<T>(xs: List<T>): Int {
+    return match (xs) {
+        List::Nil => 0,
+        List::Cons(head, tail) => 1 + list_length(tail),
+    };
+}
+
+// Builds the list of integers from start (inclusive) to end (exclusive).
+export function list_range(start: Int, end: Int): List<Int> {
+    return if (start >= end) List::Nil else List::Cons(start, list_range(start + 1, end));
+}
+
+export function list_map<A, B>(xs: List<A>, f: (A) -> B): List<B> {
+    return match (xs) {
+        List::Nil => List::Nil,
+        List::Cons(head, tail) => List::Cons(f(head), list_map(tail, f)),
+    };
+}
+
+export function list_filter<T>(xs: List<T>, pred: (T) -> Bool): List<T> {
+    return match (xs) {
+        List::Nil => List::Nil,
+        List::Cons(head, tail) => if (pred(head))
+            List::Cons(head, list_filter(tail, pred))
+        else
+            list_filter(tail, pred),
+    };
+}
+
+// Folds the list from the left: fold_left([1,2,3], 0, add) is
+// add(add(add(0, 1), 2), 3).
+// f is left unannotated because the parser does not yet accept a written
+// two-parameter function type like `(B, A) -> B`; its shape is still fully
+// recovered from how it is called below.
+export function list_fold_left<A, B>(xs: List<A>, init: B, f): B {
+    return match (xs) {
+        List::Nil => init,
+        List::Cons(head, tail) => list_fold_left(tail, f(init, head), f),
+    };
+}
+
+// Folds the list from the right: fold_right([1,2,3], 0, add) is
+// add(1, add(2, add(3, 0))).
+export function list_fold_right<A, B>(xs: List<A>, init: B, f): B {
+    return match (xs) {
+        List::Nil => init,
+        List::Cons(head, tail) => f(head, list_fold_right(tail, init, f)),
+    };
+}
+
+export function list_reverse<T>(xs: List<T>): List<T> {
+    return list_fold_left(xs, List::Nil, (acc, x) => List::Cons(x, acc));
+}
+
+// Concatenates ys onto the end of xs.
+export function list_append<T>(xs: List<T>, ys: List<T>): List<T> {
+    return match (xs) {
+        List::Nil => ys,
+        List::Cons(head, tail) => List::Cons(head, list_append(tail, ys)),
+    };
+}
+
+export function list_head<T>(xs: List<T>): Option<T> {
+    return match (xs) {
+        List::Nil => Option::None,
+        List::Cons(head, tail) => Option::Some(head),
+    };
+}
+
+export function list_find<T>(xs: List<T>, pred: (T) -> Bool): Option<T> {
+    return match (xs) {
+        List::Nil => Option::None,
+        List::Cons(head, tail) => if (pred(head)) Option::Some(head) else list_find(tail, pred),
+    };
+}
+
+export function list_any<T>(xs: List<T>, pred: (T) -> Bool): Bool {
+    return match (xs) {
+        List::Nil => false,
+        List::Cons(head, tail) => if (pred(head)) true else list_any(tail, pred),
+    };
+}
+
+export function list_all<T>(xs: List<T>, pred: (T) -> Bool): Bool {
+    return match (xs) {
+        List::Nil => true,
+        List::Cons(head, tail) => if (pred(head)) list_all(tail, pred) else false,
+    };
+}
+
+// Pairs up elements from xs and ys position by position, stopping as soon
+// as either list runs out.
+export function list_zip<A, B>(xs: List<A>, ys: List<B>): List<Pair<A, B>> {
+    return match (xs) {
+        List::Nil => List::Nil,
+        List::Cons(xHead, xTail) => match (ys) {
+            List::Nil => List::Nil,
+            List::Cons(yHead, yTail) => List::Cons(pair(xHead, yHead), list_zip(xTail, yTail)),
+        },
+    };
+}
+
+// ---------------------------------------------------------
+// Option / Result monadic helpers
+// ---------------------------------------------------------
+//
+// option_map/result_map (Option.tjs, Result.tjs) cover the Functor half of
+// each type. These fill in the Monad half (and a few other combinators
+// FP code reaches for constantly) so both types compose cleanly with the
+// combinators and List<T> above.
+
+// Chains a second, possibly-failing computation onto a present value.
+// Also known as flatMap/bind.
+export function option_and_then<A, B>(opt: Option<A>, f: (A) -> Option<B>): Option<B> {
+    return match (opt) {
+        Option::Some(v) => f(v),
+        Option::None => Option::None,
+    };
+}
+
+// Replaces a missing value with a fallback Option, leaving a present value
+// untouched.
+export function option_or_else<T>(opt: Option<T>, fallback: Option<T>): Option<T> {
+    return match (opt) {
+        Option::Some(v) => Option::Some(v),
+        Option::None => fallback,
+    };
+}
+
+// Keeps a present value only if it satisfies pred, discarding it otherwise.
+export function option_filter<T>(opt: Option<T>, pred: (T) -> Bool): Option<T> {
+    return match (opt) {
+        Option::Some(v) => if (pred(v)) Option::Some(v) else Option::None,
+        Option::None => Option::None,
+    };
+}
+
+export function option_is_some<T>(opt: Option<T>): Bool {
+    return match (opt) {
+        Option::Some(v) => true,
+        Option::None => false,
+    };
+}
+
+export function option_is_none<T>(opt: Option<T>): Bool {
+    return match (opt) {
+        Option::Some(v) => false,
+        Option::None => true,
+    };
+}
+
+// Converts a missing value into an Err carrying err, keeping a present
+// value as Ok.
+export function option_to_result<T, E>(opt: Option<T>, err: E): Result<T, E> {
+    return match (opt) {
+        Option::Some(v) => Result::Ok(v),
+        Option::None => Result::Err(err),
+    };
+}
+
+// Chains a second, possibly-failing computation onto a successful result.
+// Also known as flatMap/bind.
+export function result_and_then<T, E, B>(res: Result<T, E>, f: (T) -> Result<B, E>): Result<B, E> {
+    return match (res) {
+        Result::Ok(v) => f(v),
+        Result::Err(e) => Result::Err(e),
+    };
+}
+
+// Transforms the error carried by a failed result, leaving a success
+// untouched. The dual of result_map.
+export function result_map_err<T, E, F>(res: Result<T, E>, f: (E) -> F): Result<T, F> {
+    return match (res) {
+        Result::Ok(v) => Result::Ok(v),
+        Result::Err(e) => Result::Err(f(e)),
+    };
+}
+
+export function result_is_ok<T, E>(res: Result<T, E>): Bool {
+    return match (res) {
+        Result::Ok(v) => true,
+        Result::Err(e) => false,
+    };
+}
+
+export function result_is_err<T, E>(res: Result<T, E>): Bool {
+    return match (res) {
+        Result::Ok(v) => false,
+        Result::Err(e) => true,
+    };
+}
+
+// Discards the error, if any, turning a Result into an Option.
+export function result_to_option<T, E>(res: Result<T, E>): Option<T> {
+    return match (res) {
+        Result::Ok(v) => Option::Some(v),
+        Result::Err(e) => Option::None,
+    };
+}
