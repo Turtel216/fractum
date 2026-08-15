@@ -9,8 +9,8 @@
 //   3. app(), which boots the Model-View-Update loop (see
 //      runtime/fractum_runtime.js, global.TypedJS.app)
 
-import { Attribute, Html, div, span, h1, label, button, input, text } from "../stdlib/Html";
-import { Cmd, cmd_none } from "../stdlib/Cmd";
+import { Attribute, Html, div, span, h1, label, button, input, text } from "../../stdlib/Html";
+import { Cmd, cmd_none } from "../../stdlib/Cmd";
 
 // -- Model --
 

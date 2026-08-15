@@ -39,18 +39,25 @@ inferStmt env (Located sp stmt) = withCurrentSpan sp $ case stmt of
   SReturn _ ->
     -- Statement-level return checking can be made function-context-sensitive later.
     pure env
+  -- \| Each branch is its own scope: bindings introduced inside a branch's
+  -- block are not visible to the other branch, nor to statements after the
+  -- 'if' (matching JS's block-scoped 'let'/'const').
   SIf cond th el -> do
     tCond <- inferExpr env cond
     unify tCond TBoolT
-    envTh <- inferBlock env th
-    case el of
-      Nothing -> pure envTh
-      Just b -> inferBlock envTh b
+    _ <- inferBlock env th
+    mapM_ (inferBlock env) el
+    pure env
+  -- \| Same scoping as 'SIf': the loop body is its own scope.
   SWhile cond body -> do
     tCond <- inferExpr env cond
     unify tCond TBoolT
-    inferBlock env body
-  SBlock b -> inferBlock env b
+    _ <- inferBlock env body
+    pure env
+  -- \| A bare '{ ... }' block is also its own scope.
+  SBlock b -> do
+    _ <- inferBlock env b
+    pure env
   STypeDecl name params body -> do
     decls <- gets typeDecls
     when (M.member name decls) $
@@ -141,19 +148,20 @@ inferStmtWithRet mRet env (Located sp stmt) = withCurrentSpan sp $ case stmt of
         te <- inferExpr env e
         unify te rt
         pure env
-  SBlock b ->
-    inferBlockWithRet mRet env b
+  SBlock b -> do
+    _ <- inferBlockWithRet mRet env b
+    pure env
   SIf cond th el -> do
     tCond <- inferExpr env cond
     unify tCond TBoolT
-    envTh <- inferBlockWithRet mRet env th
-    case el of
-      Nothing -> pure envTh
-      Just b -> inferBlockWithRet mRet envTh b
+    _ <- inferBlockWithRet mRet env th
+    mapM_ (inferBlockWithRet mRet env) el
+    pure env
   SWhile cond body -> do
     tCond <- inferExpr env cond
     unify tCond TBoolT
-    inferBlockWithRet mRet env body
+    _ <- inferBlockWithRet mRet env body
+    pure env
   -- defer to existing behavior for others
   other -> inferStmt env (Located sp other)
 
