@@ -40,22 +40,19 @@ export function pipe<A, B, C>(f: (A) -> B, g: (B) -> C): (A) -> C {
 }
 
 // Swaps the order of a two-argument function's parameters.
-// f is left unannotated because the parser does not yet accept a written
-// two-parameter function type like `(A, B) -> C`; its shape is still fully
-// recovered from how it is called below.
-export function flip(f) {
+export function flip<A, B, C>(f: (A, B) -> C): (B, A) -> C {
     return (b, a) => f(a, b);
 }
 
 // Converts a two-argument function into a chain of two single-argument
 // functions, so it can be partially applied one argument at a time.
-export function curry2<A, B, C>(f): (A) -> (B) -> C {
+export function curry2<A, B, C>(f: (A, B) -> C): (A) -> (B) -> C {
     return (a) => (b) => f(a, b);
 }
 
 // The inverse of curry2: turns a chain of single-argument functions back
 // into one function taking both arguments at once.
-export function uncurry2<A, B, C>(f: (A) -> (B) -> C) {
+export function uncurry2<A, B, C>(f: (A) -> (B) -> C): (A, B) -> C {
     return (a, b) => f(a)(b);
 }
 
@@ -156,10 +153,7 @@ export function list_filter<T>(xs: List<T>, pred: (T) -> Bool): List<T> {
 
 // Folds the list from the left: fold_left([1,2,3], 0, add) is
 // add(add(add(0, 1), 2), 3).
-// f is left unannotated because the parser does not yet accept a written
-// two-parameter function type like `(B, A) -> B`; its shape is still fully
-// recovered from how it is called below.
-export function list_fold_left<A, B>(xs: List<A>, init: B, f): B {
+export function list_fold_left<A, B>(xs: List<A>, init: B, f: (B, A) -> B): B {
     return match (xs) {
         List::Nil => init,
         List::Cons(head, tail) => list_fold_left(tail, f(init, head), f),
@@ -168,7 +162,7 @@ export function list_fold_left<A, B>(xs: List<A>, init: B, f): B {
 
 // Folds the list from the right: fold_right([1,2,3], 0, add) is
 // add(1, add(2, add(3, 0))).
-export function list_fold_right<A, B>(xs: List<A>, init: B, f): B {
+export function list_fold_right<A, B>(xs: List<A>, init: B, f: (A, B) -> B): B {
     return match (xs) {
         List::Nil => init,
         List::Cons(head, tail) => f(head, list_fold_right(tail, init, f)),
