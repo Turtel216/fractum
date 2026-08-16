@@ -3,672 +3,720 @@
 
 -- |
 -- Module      : Parser
--- Description : Megaparsec-based syntactic analysis and AST generation for TypedJs.
+-- Description : Hand-written recursive-descent parser and AST generation for Fractum.
 -- Stability   : experimental
 --
--- This module implements a unified lexer and parser for the "TypedJs" surface language
--- using the @megaparsec@ library. It translates raw source text into a highly localized
--- surface AST ('Program', 'LExpr', 'LStmt'), tracking source spans to
--- feed the semantic analyzers error reporting.
+-- This module implements the Fractum grammar as a hand-written recursive
+-- descent parser over the token stream produced by "Parser.Lexer". It replaces
+-- an earlier @megaparsec@ grammar; the surface AST it produces ('Program',
+-- 'LExpr', 'LStmt') is unchanged.
 --
 -- == Architecture Overview
 --
--- * __Lexical Analysis:__
---     Lexing and parsing are interleaved. Whitespace and comments are consumed
---     automatically *after* every token using the space consumer ('sc') and 'lexeme'
---     wrappers. This means parsers typically expect no leading whitespace but will
---     consume trailing whitespace.
+-- * __Separate lexing:__
+--     "Parser.Lexer" runs first and turns the whole file into tokens. Because
+--     every token knows its own span, an AST node's span now stops at the last
+--     character of the node rather than after the trailing whitespace a lexeme
+--     combinator would have eaten, so caret underlines cover exactly the
+--     offending text.
 --
--- * __Precise Span Tracking ('Located'):__
---     AST nodes are aggresively wrapped in 'Located' via the 'withSpan' combinator.
---     Because trailing whitespace is consumed by 'lexeme', the end positions recorded
---     by 'getSourcePos' may slightly overshoot the literal token boundary, but the
---     start bounds are strictly precise.
+-- * __LL(1) dispatch instead of backtracking:__
+--     Statements, primary expressions and types are all chosen by looking at a
+--     single token ('peek'). The one genuinely ambiguous construct — @(@
+--     starting either a lambda's parameter list or a parenthesised expression —
+--     is settled by 'lambdaAhead', a bounded scan for the matching @)@. No part
+--     of the grammar backtracks over a partially consumed construct, which is
+--     what allows an error to be reported at the exact token that caused it
+--     rather than at the start of the longest failing alternative.
 --
--- * __Operator Precedence & Associativity:__
---     Instead of using @makeExprParser@, operator precedence is encoded structurally
---     via layered parser combinators ('pAssign' -> 'pLogicOr' -> 'pAdditive', etc.).
---     This manual stratification allows a custom 'chainl1' to correctly capture and
---     merge the source spans of the LHS and RHS into a unified 'LExpr' bound.
+-- * __Pratt parsing for expressions:__
+--     Rather than one function per precedence level, 'pExprBp' climbs
+--     precedence directly from the 'infixOp' table. Left recursion, precedence
+--     and associativity all fall out of the binding powers, and adding an
+--     operator is one table entry. Prefix @!@ / @-@ and the postfix chain
+--     (calls, @.field@, @[index]@) bind tighter than every infix operator and
+--     are handled in 'pUnary' and 'pPostfix'.
 --
--- * __Left-Recursion via Postfix Chains:__
---     Function calls, member access (@.foo@), and array indexing (@[i]@) are handled
---     by 'pPostfix'. It evaluates a base 'pPrimary' expression and then iteratively
---     consumes postfix operations, continually expanding the 'Span' from the original
---     base expression to the end of the most recently consumed postfix token.
+-- * __Panic-mode recovery:__
+--     Every statement is parsed at a recovery point (see 'Parser.Monad.recover').
+--     A statement that fails records its diagnostic, is abandoned, and the
+--     parser resynchronises on the next statement boundary and carries on, so a
+--     single run reports as many independent syntax errors as the file contains.
+--     'parseProgram' only returns a 'Program' when nothing at all went wrong.
 --
--- * __Type Syntax:__
---     The parser natively supports type annotations, generic instantiations ('TApp'),
---     record shapes ('TObject'), array types, and structural function types.
+-- == Entry Point
 --
--- == Entry Points
---
--- * 'parseProgram': The primary entry point. Consumes the entire input stream,
---     enforces 'eof', and maps Megaparsec's error bundle into a standard 'String'
---     on failure.
-module Parser where
+-- * 'parseProgram': lexes and parses a whole file, returning either every
+--     diagnostic collected during the pass or the finished 'Program'.
+module Parser
+  ( parseProgram,
+  )
+where
 
 import Ast
-import Control.Monad (void)
-import Data.Char (isUpper)
+import Control.Monad (void, when)
+import Control.Monad.State.Strict (gets)
 import Data.Functor (($>))
 import Data.Text (Text)
-import qualified Data.Text as T
-import qualified Data.Void as V
-import Text.Megaparsec
-  ( Parsec,
-    between,
-    choice,
-    eof,
-    getSourcePos,
-    many,
-    notFollowedBy,
-    optional,
-    runParser,
-    satisfy,
-    sepBy,
-    sepBy1,
-    try,
-    (<|>),
-  )
-import qualified Text.Megaparsec as MP
-import Text.Megaparsec.Char
-  ( alphaNumChar,
-    char,
-    letterChar,
-    space1,
-    string,
-  )
-import qualified Text.Megaparsec.Char.Lexer as L
+import Diagnostic.Types (Note (..))
+import Parser.Error (ParseError (..), ParseErrorKind (..))
+import Parser.Lexer (lexTokens)
+import Parser.Monad
+import Parser.Token
 
--- | Parser combinator
-type Parser = Parsec V.Void Text
+--------------------------------------------------------------------------------
+-- Entry point
+--------------------------------------------------------------------------------
 
--- | Convert a megaparsec 'SourcePos' to our 'Pos' type.
-toPos :: MP.SourcePos -> Pos
-toPos sp = Pos (MP.unPos (MP.sourceLine sp)) (MP.unPos (MP.sourceColumn sp))
-
--- | Run parser @p@ and wrap the result in 'Located' with the source span.
+-- | Lex and parse a complete source file.
 --
--- Note: the end position is taken *after* the parser has consumed trailing
--- whitespace (via 'lexeme'/'sc'), so spans may be slightly wider than the
--- actual token.  The start position is always accurate.
-withSpan :: Parser a -> Parser (Located a)
-withSpan p = do
-  start <- getSourcePos
-  x <- p
-  end <- getSourcePos
-  pure (Located (Span (MP.sourceName start) (toPos start) (toPos end)) x)
-
--- | Parse complete program
-parseProgram :: FilePath -> Text -> Either String Program
-parseProgram fp src =
-  case runParser (sc *> pProgram <* eof) fp src of
-    Left e -> Left (MP.errorBundlePretty e)
-    Right x -> Right x
-
--- | Ignores spaces and comments
-sc :: Parser ()
-sc = L.space space1 lineCmnt blockCmnt
+-- Returns every diagnostic the pass collected, not just the first: a file with
+-- three unrelated syntax errors reports three.
+parseProgram :: FilePath -> Text -> Either [ParseError] Program
+parseProgram file src =
+  case runParser file toks lexErrs pProgram of
+    (Just prog, []) -> Right prog
+    (_, []) -> Left [panickedWithoutDiagnostic file]
+    (_, errs) -> Left errs
   where
-    lineCmnt = L.skipLineComment "//"
-    blockCmnt = L.skipBlockComment "/*" "*/"
+    (toks, lexErrs) = lexTokens file src
 
--- | Helper for parsing a lexeme
-lexeme :: Parser a -> Parser a
-lexeme = L.lexeme sc
+-- | Unreachable in practice: 'pProgram' places a recovery point around every
+-- statement, so a panic always leaves a recorded diagnostic behind. Kept so
+-- that 'parseProgram' is total rather than partial on an impossible case.
+panickedWithoutDiagnostic :: FilePath -> ParseError
+panickedWithoutDiagnostic file =
+  ParseError
+    (Span file (Pos 1 1) (Pos 1 1))
+    (UnexpectedToken ["a declaration or statement"] "end of file")
+    []
 
--- | Parse a given symbol
-symbol :: Text -> Parser Text
-symbol = L.symbol sc
+--------------------------------------------------------------------------------
+-- Shared shapes
+--
+-- Almost every construct in the language is "a delimiter, some things joined
+-- by commas, a delimiter". Expressing that once keeps the span arithmetic and
+-- the error wording identical everywhere it appears.
+--------------------------------------------------------------------------------
 
--- | Consume parenthesis '('
-parens :: Parser a -> Parser a
-parens = between (symbol "(") (symbol ")")
+-- | Whether a separated list may end with a trailing separator.
+data TrailingSep
+  = NoTrailingSep
+  | AllowTrailingSep
+  deriving (Eq, Show)
 
--- | Consume braces '{'
-braces :: Parser a -> Parser a
-braces = between (symbol "{") (symbol "}")
+-- | @open body close@, annotated with the span covering both delimiters.
+enclosed :: Context -> Punct -> Punct -> Parser a -> Parser (Located a)
+enclosed ctx open close = enclosedWith ctx open close []
 
--- | Consume brackets '['
-brackets :: Parser a -> Parser a
-brackets = between (symbol "[") (symbol "]")
+-- | 'enclosed', naming further tokens that would also have been valid in place
+-- of the closing delimiter.
+enclosedWith :: Context -> Punct -> Punct -> [Text] -> Parser a -> Parser (Located a)
+enclosedWith ctx open close alsoValid body = do
+  opener <- expect ctx (TPunct open)
+  x <- body
+  closer <- expectClose ctx open close alsoValid (tokSpan opener)
+  pure (Located (spanning (tokSpan opener) (tokSpan closer)) x)
 
--- | Consume semicolone ';'
-semi :: Parser Text
-semi = symbol ";"
+-- | Consume a group's closing delimiter, or explain precisely what is missing.
+--
+-- Hitting end of file means the delimiter was never closed, and the useful
+-- thing to point at is where it opened. Hitting some other token means the
+-- group's contents ended earlier than expected, and the useful thing to say is
+-- what could have continued it.
+expectClose :: Context -> Punct -> Punct -> [Text] -> Span -> Parser Token
+expectClose ctx open close alsoValid openSpan = do
+  t <- peek
+  case tokKind t of
+    TPunct p | p == close -> advance
+    TEof ->
+      parseErrorWith
+        ctx
+        (UnclosedDelimiter (punctText open) (punctText close))
+        [NoteSpan openSpan ("the `" <> punctText open <> "` opened here is never closed")]
+    other ->
+      parseErrorWith
+        ctx
+        (UnexpectedToken (("`" <> punctText close <> "`") : alsoValid) (describeKind other))
+        [NoteSpan openSpan ("inside the `" <> punctText open <> "` opened here")]
 
--- | Consume comma ','
-comma :: Parser Text
-comma = symbol ","
+-- | @open p sep p sep … close@, annotated with the span covering both
+-- delimiters.
+delimited ::
+  Context -> Punct -> Punct -> Punct -> TrailingSep -> Parser a -> Parser (Located [a])
+delimited ctx open close sep trailing p =
+  enclosedWith ctx open close ["`" <> punctText sep <> "`"] (sepList close sep trailing p)
 
--- | Consume colon ':'
-colon :: Parser Text
-colon = symbol ":"
-
--- | Consume arrow symbol '=>'
-arrow :: Parser Text
-arrow = symbol "=>"
-
--- | TypedJs reserved keywords
-reserved :: [Text]
-reserved =
-  [ "let",
-    "mut",
-    "function",
-    "return",
-    "if",
-    "else",
-    "while",
-    "true",
-    "false",
-    "null",
-    "type",
-    "enum",
-    "match",
-    "import",
-    "export",
-    "from",
-    "as",
-    "Int",
-    "Bool",
-    "String"
-  ]
-
--- | Parse identifier
-identifier :: Parser Text
-identifier = lexeme . try $ do
-  x <- letterChar <|> char '_' <|> char '$'
-  xs <- many (alphaNumChar <|> char '_' <|> char '$')
-  let n = T.pack (x : xs)
-  if n `elem` reserved
-    then fail ("reserved word " <> T.unpack n)
-    else pure n
-
--- | Parse an uppercase identifier (for type names like Point, Pair)
-upperIdentifier :: Parser Text
-upperIdentifier = lexeme . try $ do
-  x <- satisfy (\c -> isUpper c)
-  xs <- many (alphaNumChar <|> char '_' <|> char '$')
-  let n = T.pack (x : xs)
-  if n `elem` reserved
-    then fail ("reserved word " <> T.unpack n)
-    else pure n
-
-rword :: Text -> Parser ()
-rword w = lexeme . try $ string w *> notFollowedBy identTail
+-- | The contents of a 'delimited' group, stopping before the closing token.
+sepList :: Punct -> Punct -> TrailingSep -> Parser a -> Parser [a]
+sepList close sep trailing p = do
+  isEmpty <- check (TPunct close)
+  if isEmpty then pure [] else go
   where
-    identTail = alphaNumChar <|> char '_' <|> char '$'
+    go = do
+      x <- p
+      more <- match (TPunct sep)
+      if not more
+        then pure [x]
+        else case trailing of
+          NoTrailingSep -> (x :) <$> go
+          AllowTrailingSep -> do
+            done <- check (TPunct close)
+            if done then pure [x] else (x :) <$> go
 
--- | Parse String literal. Allows both "" and '', similar to Javascript
-stringLit :: Parser Text
-stringLit = lexeme $ do
-  q <- char '"' <|> char '\''
-  content <- many (satisfy (/= q))
-  void (char q)
-  pure (T.pack content)
+-- | A value wrapped in parentheses, as conditions are.
+parenthesised :: Context -> Parser a -> Parser a
+parenthesised ctx p = locVal <$> enclosed ctx LParen RParen p
 
--- | Parse integer
-integer :: Parser Integer
-integer = lexeme L.decimal
+-- | An optional @: T@ annotation.
+pTypeAnnotation :: Context -> Parser (Maybe Type)
+pTypeAnnotation ctx = do
+  annotated <- match (TPunct Colon)
+  if annotated then Just <$> pType ctx else pure Nothing
+
+-- | An optional @\<A, B\>@ type parameter list.
+pTypeParams :: Context -> Parser [Name]
+pTypeParams ctx = do
+  present <- check (TPunct Less)
+  if not present
+    then pure []
+    else locVal <$> delimited ctx Less Greater Comma NoTrailingSep (locVal <$> expectIdent ctx)
+
+-- | A field name, which may be written bare or quoted.
+pFieldName :: Context -> Parser Name
+pFieldName ctx = do
+  t <- peek
+  case tokKind t of
+    TIdent n -> advance $> n
+    TStrLit s -> advance $> s
+    other -> parseError ctx (UnexpectedToken ["a field name"] (describeKind other))
+
+--------------------------------------------------------------------------------
+-- Statements
+--------------------------------------------------------------------------------
 
 pProgram :: Parser Program
-pProgram = Program <$> many pStmt
+pProgram = Program <$> stmtsUntil atEof
 
--- | Parse statement
+-- | Parse statements until @stop@ holds, recovering from any that fail.
+--
+-- This is the loop that makes multiple-error reporting work. A statement that
+-- panics costs exactly one diagnostic: it is dropped, the stream is
+-- resynchronised, and the next statement is parsed as if nothing had happened.
+-- The 'psConsumed' comparison guarantees forward progress even when both the
+-- failed statement and the resynchronisation consumed nothing.
+stmtsUntil :: Parser Bool -> Parser [LStmt]
+stmtsUntil stop = go
+  where
+    go = do
+      done <- stop
+      if done then pure [] else step
+
+    step = do
+      before <- gets psConsumed
+      outcome <- recover pStmt
+      case outcome of
+        Just s -> (s :) <$> go
+        Nothing -> do
+          synchronize
+          after <- gets psConsumed
+          eof <- atEof
+          when (after == before && not eof) (void advance)
+          go
+
+-- | A single statement, chosen from the leading token alone.
 pStmt :: Parser LStmt
 pStmt =
-  choice
-    [ try (withSpan pEnumDecl),
-      try (withSpan pTypeDecl),
-      try (withSpan pFunDecl),
-      try (withSpan pLet),
-      try (withSpan pImportDecl),
-      try (withSpan pExportDecl),
-      withSpan pReturn,
-      withSpan pIf,
-      withSpan pWhile,
-      withSpan (SBlock <$> pBlock),
-      withSpan pExprStmt
-    ]
+  peekKind >>= \case
+    TKw KwEnum -> withSpan pEnumDecl
+    TKw KwType -> withSpan pTypeDecl
+    TKw KwFunction -> withSpan pFunDecl
+    TKw KwLet -> withSpan pLet
+    TKw KwImport -> withSpan pImportDecl
+    TKw KwExport -> withSpan pExportDecl
+    TKw KwReturn -> withSpan pReturn
+    TKw KwIf -> withSpan pIfStmt
+    TKw KwWhile -> withSpan pWhile
+    TPunct LBrace -> withSpan (SBlock <$> pBlock (Context "a block"))
+    _ -> withSpan pExprStmt
 
--- | Parse Code block
-pBlock :: Parser Block
-pBlock = Block <$> braces (many pStmt)
+-- | A braced statement sequence.
+--
+-- The inner statement loop stops at @}@ /or/ at end of file, so an unclosed
+-- brace surfaces as one "unclosed delimiter" error pointing at the offending
+-- @{@ rather than as a cascade from the rest of the file.
+pBlock :: Context -> Parser Block
+pBlock ctx = do
+  opener <- expect ctx (TPunct LBrace)
+  stmts <- stmtsUntil endOfBlock
+  _ <- expectClose ctx LBrace RBrace [] (tokSpan opener)
+  pure (Block stmts)
+  where
+    endOfBlock = do
+      closing <- check (TPunct RBrace)
+      eof <- atEof
+      pure (closing || eof)
 
--- | Parse let statement. Supports optional @mut@ qualifier for mutable bindings.
+-- | @let x = e;@, @let mut x: T = e;@
 pLet :: Parser Stmt
 pLet = do
-  rword "let"
-  mutFlag <- MP.option Immutable (rword "mut" $> Mutable)
-  n <- identifier
-  ty <- optional (colon *> pType)
-  void (symbol "=")
-  e <- pExpr
-  void semi
-  pure (SLet mutFlag n ty e)
+  _ <- expect ctx (TKw KwLet)
+  mutable <- match (TKw KwMut)
+  Located _ name <- expectIdent ctx
+  ty <- pTypeAnnotation ctx
+  _ <- expect ctx (TPunct Assign)
+  value <- pExpr
+  _ <- expectSemi ctx
+  pure (SLet (if mutable then Mutable else Immutable) name ty value)
+  where
+    ctx = Context "a `let` declaration"
 
--- | Parse type alias declaration: @type Point = { x: Int, y: Int };@
--- Also supports parametric aliases: @type Pair\<A, B\> = { first: A, second: B };@
+-- | @type Point = { x: Int, y: Int };@, including parametric aliases such as
+-- @type Pair\<A, B\> = { first: A, second: B };@
 pTypeDecl :: Parser Stmt
 pTypeDecl = do
-  rword "type"
-  name <- upperIdentifier
-  params <- MP.option [] (angles (identifier `sepBy1` comma))
-  void (symbol "=")
-  body <- pType
-  void semi
+  _ <- expect ctx (TKw KwType)
+  Located _ name <- expectUpperIdent ctx
+  params <- pTypeParams ctx
+  _ <- expect ctx (TPunct Assign)
+  body <- pType ctx
+  _ <- expectSemi ctx
   pure (STypeDecl name params body)
   where
-    angles = between (symbol "<") (symbol ">")
+    ctx = Context "a type declaration"
 
--- | Parse enum declaration: @enum Shape { Circle(Int), Point }@
--- Also supports parametric enums: @enum Option\<T\> { Some(T), None }@
+-- | @enum Shape { Circle(Int), Point }@, including parametric enums such as
+-- @enum Option\<T\> { Some(T), None }@
 pEnumDecl :: Parser Stmt
 pEnumDecl = do
-  rword "enum"
-  name <- upperIdentifier
-  params <- MP.option [] (angles (identifier `sepBy1` comma))
-  variants <- braces (pVariant `MP.sepEndBy` comma)
-  pure (SEnum name params variants)
+  _ <- expect ctx (TKw KwEnum)
+  Located _ name <- expectUpperIdent ctx
+  params <- pTypeParams ctx
+  variants <- delimited ctx LBrace RBrace Comma AllowTrailingSep pVariant
+  pure (SEnum name params (locVal variants))
   where
-    angles = between (symbol "<") (symbol ">")
+    ctx = Context "an enum declaration"
     pVariant = do
-      vname <- upperIdentifier
-      fields <- MP.option [] (parens (pType `sepBy` comma))
-      pure (Variant vname fields)
+      Located _ name <- expectUpperIdent ctx
+      present <- check (TPunct LParen)
+      fields <-
+        if present
+          then locVal <$> delimited ctx LParen RParen Comma NoTrailingSep (pType ctx)
+          else pure []
+      pure (Variant name fields)
 
--- | Parse import declaration: @import { a, b as c } from "./path";@
+-- | @import { a, b as c } from "./path";@
 pImportDecl :: Parser Stmt
 pImportDecl = do
-  rword "import"
-  items <- braces (pImportItem `sepBy1` comma)
-  rword "from"
-  path <- stringLit
-  void semi
-  pure (SImport items path)
+  _ <- expect ctx (TKw KwImport)
+  items <- delimited ctx LBrace RBrace Comma NoTrailingSep pImportItem
+  _ <- expectWith ctx [NoteHelp "an import list is followed by `from \"./module\"`"] (TKw KwFrom)
+  Located _ path <- expectString ctx
+  _ <- expectSemi ctx
+  pure (SImport (locVal items) path)
   where
+    ctx = Context "an import declaration"
     pImportItem = do
-      n <- identifier <|> upperIdentifier
-      alias <- optional (rword "as" *> (identifier <|> upperIdentifier))
-      pure (ImportItem n alias)
+      Located _ name <- expectIdent ctx
+      aliased <- match (TKw KwAs)
+      alias <- if aliased then Just . locVal <$> expectIdent ctx else pure Nothing
+      pure (ImportItem name alias)
 
--- | Parse export declaration: @export <let|function|type|enum>@
+-- | @export \<let|function|type|enum\>@
 pExportDecl :: Parser Stmt
 pExportDecl = do
-  rword "export"
-  SExport <$> withSpan (choice [pLet, pFunDecl, pTypeDecl, pEnumDecl])
+  _ <- expect ctx (TKw KwExport)
+  SExport <$> withSpan pExported
+  where
+    ctx = Context "an export declaration"
+    pExported =
+      peekKind >>= \case
+        TKw KwLet -> pLet
+        TKw KwFunction -> pFunDecl
+        TKw KwType -> pTypeDecl
+        TKw KwEnum -> pEnumDecl
+        other ->
+          parseErrorWith
+            ctx
+            (UnexpectedToken ["`let`", "`function`", "`type`", "`enum`"] (describeKind other))
+            [NoteHelp "only `let`, `function`, `type` and `enum` declarations can be exported"]
 
--- | Parse Declaration
+-- | @function name\<T\>(a: T): R { … }@
 pFunDecl :: Parser Stmt
 pFunDecl = do
-  rword "function"
-  n <- identifier
-  tyParams <- MP.option [] (angles (identifier `sepBy1` comma))
-  params <- parens (pParam `sepBy` comma)
-  retTy <- optional (colon *> pType)
-  b <- pBlock
-  pure (SFun n tyParams params retTy b)
+  _ <- expect ctx (TKw KwFunction)
+  Located _ name <- expectIdent ctx
+  tyParams <- pTypeParams ctx
+  params <- delimited ctx LParen RParen Comma NoTrailingSep (pParam ctx)
+  retTy <- pTypeAnnotation ctx
+  body <- pBlock ctx
+  pure (SFun name tyParams (locVal params) retTy body)
   where
-    angles = between (symbol "<") (symbol ">")
+    ctx = Context "a function declaration"
 
--- | Parse return statement
+-- | @return;@ or @return e;@
 pReturn :: Parser Stmt
 pReturn = do
-  rword "return"
-  e <- optional pExpr
-  void semi
-  pure (SReturn e)
+  _ <- expect ctx (TKw KwReturn)
+  bare <- check (TPunct Semi)
+  value <- if bare then pure Nothing else Just <$> pExpr
+  _ <- expectSemi ctx
+  pure (SReturn value)
+  where
+    ctx = Context "a `return` statement"
 
--- | Parse if statement
-pIf :: Parser Stmt
-pIf = do
-  rword "if"
-  cond <- parens pExpr
-  th <- pBlock
-  el <- optional (rword "else" *> pBlock)
-  pure (SIf cond th el)
+-- | @if (cond) { … } else { … }@. The branches of an @if@ /statement/ are
+-- always blocks; @if@ used as an expression is 'pIfExpr'.
+pIfStmt :: Parser Stmt
+pIfStmt = do
+  _ <- expect ctx (TKw KwIf)
+  cond <- parenthesised ctx pExpr
+  thenB <- pBlock ctx
+  hasElse <- match (TKw KwElse)
+  elseB <- if hasElse then Just <$> pBlock ctx else pure Nothing
+  pure (SIf cond thenB elseB)
+  where
+    ctx = Context "an `if` statement"
 
--- | Parse while loop
+-- | @while (cond) { … }@
 pWhile :: Parser Stmt
 pWhile = do
-  rword "while"
-  cond <- parens pExpr
-  b <- pBlock
-  pure (SWhile cond b)
+  _ <- expect ctx (TKw KwWhile)
+  cond <- parenthesised ctx pExpr
+  body <- pBlock ctx
+  pure (SWhile cond body)
+  where
+    ctx = Context "a `while` loop"
 
--- | Parse Expression Statement
+-- | A bare expression terminated by @;@.
 pExprStmt :: Parser Stmt
 pExprStmt = do
   e <- pExpr
-  void semi
+  _ <- expectSemi ctx
   pure (SExpr e)
+  where
+    ctx = Context "an expression statement"
 
--- | Parse function parameters
-pParam :: Parser Param
-pParam = do
-  n <- identifier
-  ty <- optional (colon *> pType)
-  pure (Param n ty)
+-- | A function or lambda parameter.
+pParam :: Context -> Parser Param
+pParam ctx = do
+  Located _ name <- expectIdent ctx
+  Param name <$> pTypeAnnotation ctx
 
--- | Parse Expression
+-- | The statement terminator, with a nudge when it is the thing missing.
+expectSemi :: Context -> Parser Token
+expectSemi ctx = expectWith ctx [NoteHelp "statements are terminated with `;`"] (TPunct Semi)
+
+--------------------------------------------------------------------------------
+-- Expressions: Pratt parser
+--
+-- Precedence and associativity live entirely in 'infixOp'. 'pExprBp' consumes
+-- an operator only while its precedence is at least the caller's minimum,
+-- which is what turns the flat token stream into a correctly nested tree
+-- without a function per precedence level.
+--------------------------------------------------------------------------------
+
+data Assoc = AssocLeft | AssocRight
+  deriving (Eq, Show)
+
+-- | The node an infix operator builds. Kept as data rather than a function so
+-- that the operator table stays inspectable and comparable.
+data InfixNode
+  = NodeAssign
+  | NodeBinary !BinOp
+  deriving (Eq, Show)
+
+data InfixOp = InfixOp
+  { opPrec :: !Int,
+    opAssoc :: !Assoc,
+    opNode :: !InfixNode
+  }
+  deriving (Eq, Show)
+
+-- | The infix operator table: the whole of Fractum's precedence and
+-- associativity, in one place.
+--
+-- Assignment is lowest and right-associative, so @a = b = c@ groups as
+-- @a = (b = c)@ and its left operand is a full postfix expression, which is
+-- what lets @obj.field = v@ and @arr[i] = v@ parse without a special case.
+infixOp :: TokenKind -> Maybe InfixOp
+infixOp = \case
+  TPunct Assign -> Just (InfixOp 1 AssocRight NodeAssign)
+  TPunct PipePipe -> Just (InfixOp 2 AssocLeft (NodeBinary Or))
+  TPunct AmpAmp -> Just (InfixOp 3 AssocLeft (NodeBinary And))
+  TPunct EqEq -> Just (InfixOp 4 AssocLeft (NodeBinary Eq))
+  TPunct BangEq -> Just (InfixOp 4 AssocLeft (NodeBinary Neq))
+  TPunct LessEq -> Just (InfixOp 5 AssocLeft (NodeBinary Lte))
+  TPunct Less -> Just (InfixOp 5 AssocLeft (NodeBinary Lt))
+  TPunct GreaterEq -> Just (InfixOp 5 AssocLeft (NodeBinary Gte))
+  TPunct Greater -> Just (InfixOp 5 AssocLeft (NodeBinary Gt))
+  TPunct Plus -> Just (InfixOp 6 AssocLeft (NodeBinary Add))
+  TPunct Minus -> Just (InfixOp 6 AssocLeft (NodeBinary Sub))
+  TPunct Star -> Just (InfixOp 7 AssocLeft (NodeBinary Mul))
+  TPunct Slash -> Just (InfixOp 7 AssocLeft (NodeBinary Div))
+  TPunct Percent -> Just (InfixOp 7 AssocLeft (NodeBinary Mod))
+  _ -> Nothing
+
+-- | The minimum precedence the right operand must clear. Bumping it by one for
+-- left-associative operators is what stops @a - b - c@ from grouping to the
+-- right.
+rightBindingPower :: InfixOp -> Int
+rightBindingPower op = case opAssoc op of
+  AssocLeft -> opPrec op + 1
+  AssocRight -> opPrec op
+
+buildInfix :: InfixNode -> LExpr -> LExpr -> Expr
+buildInfix NodeAssign = EAssign
+buildInfix (NodeBinary op) = EBinary op
+
 pExpr :: Parser LExpr
-pExpr = pAssign
+pExpr = pExprBp 0
 
--- | Parse Assignment
-pAssign :: Parser LExpr
-pAssign = do
-  lhs <- pLogicOr
-  optional (symbol "=") >>= \case
-    Nothing -> pure lhs
-    Just _ -> do
-      rhs <- pAssign
-      let sp = Span (spanFile (locSpan lhs)) (spanStart (locSpan lhs)) (spanEnd (locSpan rhs))
-      pure (Located sp (EAssign lhs rhs))
+-- | Parse an expression, folding in every infix operator that binds at least
+-- as tightly as @minBp@.
+pExprBp :: Int -> Parser LExpr
+pExprBp minBp = pUnary >>= loop
+  where
+    loop lhs =
+      peekKind >>= \k -> case infixOp k of
+        Just op | opPrec op >= minBp -> do
+          _ <- advance
+          rhs <- pExprBp (rightBindingPower op)
+          let node = buildInfix (opNode op) lhs rhs
+          loop (Located (spanning (locSpan lhs) (locSpan rhs)) node)
+        _ -> pure lhs
 
--- | Parse Logical Or
-pLogicOr :: Parser LExpr
-pLogicOr = chainl1 pLogicAnd (symbol "||" $> EBinary Or)
-
--- | Parse Logical And
-pLogicAnd :: Parser LExpr
-pLogicAnd = chainl1 pEquality (symbol "&&" $> EBinary And)
-
--- | Parse Equality expression. Both '==' and '!='
-pEquality :: Parser LExpr
-pEquality =
-  chainl1
-    pRelational
-    ( choice
-        [ symbol "==" $> EBinary Eq,
-          symbol "!=" $> EBinary Neq
-        ]
-    )
-
--- | Parse relational expressions
-pRelational :: Parser LExpr
-pRelational =
-  chainl1
-    pAdditive
-    ( choice
-        [ symbol "<=" $> EBinary Lte,
-          symbol "<" $> EBinary Lt,
-          symbol ">=" $> EBinary Gte,
-          symbol ">" $> EBinary Gt
-        ]
-    )
-
--- | Parse Additive binary operation:
---
--- * @+@
---
--- * @-@
-pAdditive :: Parser LExpr
-pAdditive =
-  chainl1
-    pMultiplicative
-    ( choice
-        [ symbol "+" $> EBinary Add,
-          symbol "-" $> EBinary Sub
-        ]
-    )
-
--- | Parse multiplcative Binary operation:
---
--- * @*@
---
--- * @/@
---
--- * @%@
-pMultiplicative :: Parser LExpr
-pMultiplicative =
-  chainl1
-    pUnary
-    ( choice
-        [ symbol "*" $> EBinary Mul,
-          symbol "/" $> EBinary Div,
-          symbol "%" $> EBinary Mod
-        ]
-    )
-
--- | Parse Unary operation:
---
--- * @!@
---
--- * @-@
+-- | Prefix @!@ and @-@, which bind tighter than every infix operator: @-a * b@
+-- is @(-a) * b@ and @-f(x)@ is @-(f(x))@.
 pUnary :: Parser LExpr
 pUnary =
-  choice
-    [ withSpan $ EUnary Not <$> (symbol "!" *> pUnary),
-      withSpan $ EUnary Neg <$> (symbol "-" *> pUnary),
-      pPostfix
-    ]
-
-pPostfix :: Parser LExpr
-pPostfix = do
-  base <- pPrimary
-  pChain base
+  peekKind >>= \case
+    TPunct Bang -> prefix Not
+    TPunct Minus -> prefix Neg
+    _ -> pPostfix
   where
-    pChain e =
-      choice
-        [ try $ do
-            args <- parens (map Arg <$> (pExpr `sepBy` comma))
-            endP <- getSourcePos
-            let sp = Span (spanFile (locSpan e)) (spanStart (locSpan e)) (toPos endP)
-            pChain (Located sp (ECall e args)),
-          try $ do
-            void (symbol ".")
-            f <- identifier
-            endP <- getSourcePos
-            let sp = Span (spanFile (locSpan e)) (spanStart (locSpan e)) (toPos endP)
-            pChain (Located sp (EMember e f)),
-          try $ do
-            ix <- brackets pExpr
-            endP <- getSourcePos
-            let sp = Span (spanFile (locSpan e)) (spanStart (locSpan e)) (toPos endP)
-            pChain (Located sp (EIndex e ix)),
-          pure e
-        ]
+    prefix op = withSpan (EUnary op <$> (advance *> pUnary))
 
+-- | The postfix chain: calls, member access and indexing, applied left to
+-- right to a primary expression.
+--
+-- Each step extends the span from the start of the base expression to the end
+-- of the postfix operation just consumed, so @a.b(c)[d]@ reports as one node
+-- covering all of it.
+pPostfix :: Parser LExpr
+pPostfix = pPrimary >>= chain
+  where
+    chain e =
+      peekKind >>= \case
+        TPunct LParen -> do
+          args <- delimited ctx LParen RParen Comma NoTrailingSep pExpr
+          extend e (locSpan args) (ECall e (map Arg (locVal args)))
+        TPunct Dot -> do
+          _ <- advance
+          field <- expectIdent ctx
+          extend e (locSpan field) (EMember e (locVal field))
+        TPunct LBracket -> do
+          index <- enclosed ctx LBracket RBracket pExpr
+          extend e (locSpan index) (EIndex e (locVal index))
+        _ -> pure e
+
+    -- Grow the node's span from the start of the base expression to the end of
+    -- the postfix operation just consumed, then keep chaining.
+    extend base end node = chain (Located (spanning (locSpan base) end) node)
+
+    ctx = Context "an expression"
+
+-- | An atomic expression, chosen from the leading token alone.
 pPrimary :: Parser LExpr
 pPrimary =
-  choice
-    [ try (withSpan pLambdaRaw),
-      try (withSpan pIfExprRaw),
-      try (withSpan pMatchExprRaw),
-      withSpan (ELit <$> pLiteral),
-      try (withSpan pObjectRaw),
-      try (withSpan pArrayRaw),
-      try (withSpan pVariantExprRaw),
-      withSpan (EVar <$> identifier),
-      withSpan (EParens <$> parens pExpr)
-    ]
-
--- | Parse Lambda Expression (returns raw Expr, wrapped by withSpan)
-pLambdaRaw :: Parser Expr
-pLambdaRaw = do
-  params <- parens (pParam `sepBy` comma)
-  retTy <- optional (colon *> pType)
-  void arrow
-  body <- pExpr
-  pure (ELam params retTy body)
-
--- | Parse if expression (returns raw Expr)
-pIfExprRaw :: Parser Expr
-pIfExprRaw = do
-  rword "if"
-  c <- parens pExpr
-  t <- pExpr
-  rword "else"
-  f <- pExpr
-  pure (EIfExpr c t f)
-
--- | Parse match expression (returns raw Expr).
--- @match (scrutinee) { Pattern => expr, ... }@
-pMatchExprRaw :: Parser Expr
-pMatchExprRaw = do
-  rword "match"
-  scrut <- parens pExpr
-  arms <- braces (pMatchArm `MP.sepEndBy` comma)
-  pure (EMatch scrut arms)
+  peekKind >>= \case
+    TKw KwTrue -> literal (LBool True)
+    TKw KwFalse -> literal (LBool False)
+    TKw KwNull -> literal LNull
+    TIntLit n -> literal (LInt n)
+    TStrLit s -> literal (LString s)
+    TKw KwIf -> withSpan pIfExpr
+    TKw KwMatch -> withSpan pMatchExpr
+    TPunct LBracket -> withSpan pArrayLit
+    TPunct LBrace -> withSpan pObjectLit
+    TPunct LParen -> pParensOrLambda
+    TIdent n -> withSpan (pVarOrVariant n)
+    other ->
+      parseErrorWith
+        ctx
+        (UnexpectedToken ["an expression"] (describeKind other))
+        [NoteText "an expression is a literal, a name, or one of `(`, `[`, `{`, `if`, `match`"]
   where
-    pMatchArm = do
-      pat <- pPattern
-      void arrow
-      body <- pExpr
-      pure (MatchArm pat body)
+    literal l = withSpan (advance $> ELit l)
+    ctx = Context "an expression"
 
--- | Parse a pattern: @EnumName::VariantName(x, y)@ or @_@.
-pPattern :: Parser Pattern
-pPattern =
-  choice
-    [ try pVariantPat,
-      symbol "_" $> PWild
-    ]
+-- | @(a, b) => e@ and @(a): T => e@ against @(e)@.
+--
+-- Both start with @(@; 'lambdaAhead' decides which by looking past the
+-- matching @)@, so neither alternative is ever parsed and thrown away.
+pParensOrLambda :: Parser LExpr
+pParensOrLambda = do
+  isLambda <- lambdaAhead
+  if isLambda
+    then withSpan pLambda
+    else withSpan (EParens . locVal <$> enclosed ctx LParen RParen pExpr)
   where
-    pVariantPat = do
-      enumName <- upperIdentifier
-      void (symbol "::")
-      varName <- upperIdentifier
-      bindings <- MP.option [] (parens (identifier `sepBy` comma))
-      pure (PVariant enumName varName bindings)
+    ctx = Context "a parenthesised expression"
 
--- | Parse variant constructor expression (returns raw Expr).
--- @EnumName::VariantName(args)@ or @EnumName::VariantName@ (unit variant).
-pVariantExprRaw :: Parser Expr
-pVariantExprRaw = do
-  enumName <- upperIdentifier
-  void (symbol "::")
-  varName <- upperIdentifier
-  args <- MP.option [] (try $ parens (pExpr `sepBy` comma))
-  pure (EVariant enumName varName args)
-
--- | Parse Literal:
---
--- * true
---
--- * false
---
--- * null
---
--- * String literals
---
--- * Integer literals
-pLiteral :: Parser Literal
-pLiteral =
-  choice
-    [ rword "true" $> LBool True,
-      rword "false" $> LBool False,
-      rword "null" $> LNull,
-      LString <$> stringLit,
-      LInt <$> integer
-    ]
-
--- | Parse Arrays (returns raw Expr)
-pArrayRaw :: Parser Expr
-pArrayRaw = EArray <$> brackets (pExpr `MP.sepEndBy` comma)
-
--- | Parse Objects (returns raw Expr)
-pObjectRaw :: Parser Expr
-pObjectRaw = EObject <$> braces (pField `MP.sepEndBy` comma)
+pLambda :: Parser Expr
+pLambda = do
+  params <- delimited ctx LParen RParen Comma NoTrailingSep (pParam ctx)
+  retTy <- pTypeAnnotation ctx
+  _ <- expect ctx (TPunct FatArrow)
+  ELam (locVal params) retTy <$> pExpr
   where
+    ctx = Context "a lambda"
+
+-- | A bare name, or a qualified variant constructor @Enum::Variant(args)@.
+pVarOrVariant :: Name -> Parser Expr
+pVarOrVariant name = do
+  _ <- advance
+  qualified <- check (TPunct ColonColon)
+  if not (qualified && isUpperName name)
+    then pure (EVar name)
+    else do
+      _ <- advance
+      Located _ variant <- expectUpperIdent ctx
+      present <- check (TPunct LParen)
+      args <-
+        if present
+          then locVal <$> delimited ctx LParen RParen Comma NoTrailingSep pExpr
+          else pure []
+      pure (EVariant name variant args)
+  where
+    ctx = Context "an enum variant"
+
+-- | @if (c) a else b@ as an expression; both branches are expressions, and the
+-- @else@ is mandatory because the expression must have a value.
+pIfExpr :: Parser Expr
+pIfExpr = do
+  _ <- expect ctx (TKw KwIf)
+  cond <- parenthesised ctx pExpr
+  thenE <- pExpr
+  _ <- expectWith ctx [NoteHelp "an `if` expression must have an `else` branch, since it has to produce a value"] (TKw KwElse)
+  EIfExpr cond thenE <$> pExpr
+  where
+    ctx = Context "an `if` expression"
+
+-- | @match (scrutinee) { Pattern => expr, … }@
+pMatchExpr :: Parser Expr
+pMatchExpr = do
+  _ <- expect ctx (TKw KwMatch)
+  scrutinee <- parenthesised ctx pExpr
+  arms <- delimited ctx LBrace RBrace Comma AllowTrailingSep pArm
+  pure (EMatch scrutinee (locVal arms))
+  where
+    ctx = Context "a `match` expression"
+    pArm = do
+      pat <- pPattern ctx
+      _ <- expect ctx (TPunct FatArrow)
+      MatchArm pat <$> pExpr
+
+-- | @Enum::Variant(x, y)@ or the wildcard @_@. Patterns are flat: a binding is
+-- a plain name, never a nested pattern.
+pPattern :: Context -> Parser Pattern
+pPattern ctx =
+  peekKind >>= \case
+    TIdent "_" -> advance $> PWild
+    TIdent name | isUpperName name -> pVariantPat name
+    other ->
+      parseErrorWith
+        ctx
+        (UnexpectedToken ["a pattern"] (describeKind other))
+        [NoteHelp "a pattern is either `Enum::Variant(x, y)` or the wildcard `_`"]
+  where
+    pVariantPat name = do
+      _ <- advance
+      _ <- expect ctx (TPunct ColonColon)
+      Located _ variant <- expectUpperIdent ctx
+      present <- check (TPunct LParen)
+      bindings <-
+        if present
+          then locVal <$> delimited ctx LParen RParen Comma NoTrailingSep (locVal <$> expectIdent ctx)
+          else pure []
+      pure (PVariant name variant bindings)
+
+pArrayLit :: Parser Expr
+pArrayLit =
+  EArray . locVal <$> delimited ctx LBracket RBracket Comma AllowTrailingSep pExpr
+  where
+    ctx = Context "an array literal"
+
+pObjectLit :: Parser Expr
+pObjectLit =
+  EObject . locVal <$> delimited ctx LBrace RBrace Comma AllowTrailingSep pField
+  where
+    ctx = Context "an object literal"
     pField = do
-      k <- identifier <|> stringLit
-      void colon
-      v <- pExpr
-      pure (k, v)
+      key <- pFieldName ctx
+      _ <- expect ctx (TPunct Colon)
+      value <- pExpr
+      pure (key, value)
 
-pType :: Parser Type
-pType = pFunType
+--------------------------------------------------------------------------------
+-- Types
+--------------------------------------------------------------------------------
 
--- Right-assoc function type:
--- (A, B) -> C
--- A -> B -> C   as A -> (B -> C)
-pFunType :: Parser Type
-pFunType = do
-  lhs <- pTypeAtomOrTuple
-  rest lhs
+-- | What sits to the left of a possible @->@.
+--
+-- A parenthesised group is genuinely ambiguous until the @->@ either shows up
+-- or does not: @(Int)@ is just @Int@, while @(Int, Int)@ is only meaningful as
+-- a parameter list. Modelling that as data rather than guessing is what lets
+-- @(A, B) -> C@ parse as the two-parameter function type it obviously is.
+data TypeLhs
+  = LhsType Type
+  | LhsParams [Type]
+  deriving (Eq, Show)
+
+-- | A type, right-associative in @->@: @A -> B -> C@ is @A -> (B -> C)@.
+pType :: Context -> Parser Type
+pType ctx = do
+  lhs <- pTypeLhs
+  isFun <- match (TPunct Arrow)
+  case (lhs, isFun) of
+    (LhsType t, False) -> pure t
+    (LhsType t, True) -> TFun [t] <$> pType ctx
+    (LhsParams ts, True) -> TFun ts <$> pType ctx
+    (LhsParams [t], False) -> pure t
+    (LhsParams _, False) -> parseError ctx DanglingParamList
   where
-    rest lhs =
-      ( do
-          void (symbol "->")
-          rhs <- pFunType
-          case lhs of
-            TFun as r -> pure (TFun as (collapse rhs r))
-            _ -> pure (TFun [lhs] rhs)
-      )
-        <|> pure lhs
+    pTypeLhs = do
+      parenthesied <- check (TPunct LParen)
+      if parenthesied
+        then LhsParams . locVal <$> delimited ctx LParen RParen Comma NoTrailingSep (pType ctx)
+        else LhsType <$> pTypeAtom ctx
 
-    collapse r1 r2 = TFun [r2] r1
-
-pTypeAtomOrTuple :: Parser Type
-pTypeAtomOrTuple =
-  choice
-    [ parens $ do
-        ts <- pType `sepBy` comma
-        case ts of
-          [] -> fail "empty type tuple not allowed"
-          [t] -> pure t
-          xs -> pure (TFun xs (TVar "_Tuple")), -- simple placeholder strategy
-      pTypeAtom
-    ]
-
-pTypeAtom :: Parser Type
-pTypeAtom =
-  choice
-    [ rword "Int" $> TInt,
-      rword "Bool" $> TBool,
-      rword "String" $> TString,
-      try pArrayType,
-      try pObjectType,
-      try pTypeApp,
-      try pTypeRef,
-      TVar <$> identifier
-    ]
-
--- | Parse a bare uppercase type reference (no angle brackets).
--- E.g. @Point@ becomes @TApp "Point" []@.
-pTypeRef :: Parser Type
-pTypeRef = do
-  name <- upperIdentifier
-  pure (TApp name [])
-
--- | Parse Array type declaration
-pArrayType :: Parser Type
-pArrayType = TArray <$> brackets pType
-
--- | Parse Object type declaration
-pObjectType :: Parser Type
-pObjectType = TObject <$> braces (pField `sepBy` comma)
+-- | An atomic type: a builtin, an array, an object shape, or a named type with
+-- optional type arguments.
+--
+-- A bare lowercase name is a type variable; a bare capitalised name is a
+-- nullary application, which is what lets the checker resolve it against
+-- whatever type parameters, aliases or enums are in scope.
+pTypeAtom :: Context -> Parser Type
+pTypeAtom ctx =
+  peekKind >>= \case
+    TKw KwInt -> advance $> TInt
+    TKw KwBool -> advance $> TBool
+    TKw KwString -> advance $> TString
+    TPunct LBracket -> TArray . locVal <$> enclosed ctx LBracket RBracket (pType ctx)
+    TPunct LBrace ->
+      TObject . locVal <$> delimited ctx LBrace RBrace Comma NoTrailingSep pTypeField
+    TIdent name -> advance *> pNamed name
+    other -> parseError ctx (UnexpectedToken ["a type"] (describeKind other))
   where
-    pField = do
-      k <- identifier <|> stringLit
-      void colon
-      t <- pType
-      pure (k, t)
+    pNamed name = do
+      applied <- check (TPunct Less)
+      if applied
+        then TApp name . locVal <$> delimited ctx Less Greater Comma NoTrailingSep (pType ctx)
+        else pure (if isUpperName name then TApp name [] else TVar name)
 
-pTypeApp :: Parser Type
-pTypeApp = do
-  ctor <- identifier
-  args <- angles (pType `sepBy1` comma)
-  pure (TApp ctor args)
-  where
-    angles = between (symbol "<") (symbol ">")
-
--- | Left-associative binary operator chain that produces 'LExpr' nodes.
--- The operator function combines two 'LExpr' into a raw 'Expr', and the
--- chain automatically wraps the result in 'Located' with a span covering
--- both operands.
-chainl1 :: Parser LExpr -> Parser (LExpr -> LExpr -> Expr) -> Parser LExpr
-chainl1 p op = do
-  x <- p
-  rest x
-  where
-    rest x =
-      ( do
-          f <- op
-          y <- p
-          let sp = Span (spanFile (locSpan x)) (spanStart (locSpan x)) (spanEnd (locSpan y))
-          rest (Located sp (f x y))
-      )
-        <|> pure x
+    pTypeField = do
+      key <- pFieldName ctx
+      _ <- expect ctx (TPunct Colon)
+      value <- pType ctx
+      pure (key, value)

@@ -4,7 +4,7 @@ import Ast (Program)
 import qualified Data.Map.Strict as M
 import qualified Data.Text as T
 import Desuger (lowerProgram)
-import Diagnostic (renderDiagnostic)
+import Diagnostic (CompileError (..), renderCompileError)
 import Emit (emitProgram)
 import Parser
 import Resolver (resolveEntry)
@@ -15,10 +15,12 @@ import Typecheck
 compileSource :: Bool -> FilePath -> T.Text -> Either T.Text T.Text
 compileSource disableColor file src =
   case parseProgram file src of
-    Left perr ->
-      Left (T.pack perr)
+    Left perrs ->
+      Left (renderCompileError disableColor srcs (ParseFailure perrs))
     Right prog ->
-      compileProgram disableColor (M.singleton file src) prog
+      compileProgram disableColor srcs prog
+  where
+    srcs = M.singleton file src
 
 -- | Full compilation pipeline starting from an entry file: resolves the
 -- whole import graph into a single flattened 'Program', then typechecks,
@@ -27,7 +29,7 @@ compileFile :: Bool -> FilePath -> IO (Either T.Text T.Text)
 compileFile disableColor entryFile = do
   (result, srcs) <- resolveEntry entryFile
   pure $ case result of
-    Left terr -> Left (renderDiagnostic disableColor srcs terr)
+    Left cerr -> Left (renderCompileError disableColor srcs cerr)
     Right prog -> compileProgram disableColor srcs prog
 
 -- | Typecheck, desugar, and emit an already-parsed (and, for multi-file
@@ -36,6 +38,6 @@ compileProgram :: Bool -> M.Map FilePath T.Text -> Program -> Either T.Text T.Te
 compileProgram disableColor srcs prog =
   case inferProgram prog of
     Left terr ->
-      Left (renderDiagnostic disableColor srcs terr)
+      Left (renderCompileError disableColor srcs (TypeFailure terr))
     Right _ ->
       Right (emitProgram (lowerProgram prog))

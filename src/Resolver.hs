@@ -31,6 +31,7 @@ import qualified Data.Set as S
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.IO as TIO
+import Diagnostic (CompileError (..))
 import Parser (parseProgram)
 import System.Directory (doesFileExist)
 import System.FilePath (normalise, takeDirectory, takeExtension, (<.>), (</>))
@@ -51,7 +52,11 @@ data DiscoverState = DiscoverState
 -- thrown error does not discard the sources read so far: 'resolveEntry'
 -- wants those available even on failure, to render a proper snippet for
 -- errors like 'ModuleNotFound' or 'CircularImport'.
-type Discover a = ExceptT TypeError (StateT DiscoverState IO) a
+--
+-- The error type is a 'CompileError' rather than a 'TypeError' because
+-- discovery both parses and resolves: a syntax error in an imported module
+-- has to travel out of here with its own diagnostics intact.
+type Discover a = ExceptT CompileError (StateT DiscoverState IO) a
 
 -- | Resolve an import path relative to the file that wrote it. The
 -- extension defaults to @.tjs@ when omitted.
@@ -69,7 +74,7 @@ discoverModule :: [FilePath] -> FilePath -> Maybe Span -> Discover ()
 discoverModule stack path mImportSpan
   | path `elem` stack =
       let cycleChain = dropWhile (/= path) (reverse stack) ++ [path]
-       in throwError (TypeError mImportSpan (CircularImport (map T.pack cycleChain)) [])
+       in throwError (TypeFailure (TypeError mImportSpan (CircularImport (map T.pack cycleChain)) []))
   | otherwise = do
       st <- get
       if M.member path (dsVisited st)
@@ -77,12 +82,12 @@ discoverModule stack path mImportSpan
         else do
           exists <- liftIO (doesFileExist path)
           if not exists
-            then throwError (TypeError mImportSpan (ModuleNotFound (T.pack path)) [])
+            then throwError (TypeFailure (TypeError mImportSpan (ModuleNotFound (T.pack path)) []))
             else do
               src <- liftIO (TIO.readFile path)
               modify' (\s -> s {dsSources = M.insert path src (dsSources s)})
               case parseProgram path src of
-                Left perr -> throwError (TypeError Nothing (OtherError (T.pack perr)) [])
+                Left perrs -> throwError (ParseFailure perrs)
                 Right (Program stmts) -> do
                   let stack' = path : stack
                   forM_ stmts $ \(Located sp stmt) -> case stmt of
@@ -385,7 +390,7 @@ linkModule st (ModuleUnit path stmts) = do
 -- error hit) together with every source file successfully loaded, whether
 -- or not resolution ultimately succeeded — so a diagnostic for e.g.
 -- 'ModuleNotFound' can still render a snippet from the importing file.
-resolveEntry :: FilePath -> IO (Either TypeError Program, M.Map FilePath Text)
+resolveEntry :: FilePath -> IO (Either CompileError Program, M.Map FilePath Text)
 resolveEntry entryFile = do
   let entryPath = normalise entryFile
   (discovered, ds) <-
@@ -395,7 +400,7 @@ resolveEntry entryFile = do
         Right () ->
           let modules = [dsVisited ds M.! p | p <- dsOrder ds]
            in case foldLink (LinkState S.empty S.empty M.empty) modules of
-                Left err -> Left err
+                Left err -> Left (TypeFailure err)
                 Right (flattened, _) -> Right (Program flattened)
   pure (linked, dsSources ds)
   where
