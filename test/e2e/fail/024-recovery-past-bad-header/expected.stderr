@@ -1,0 +1,26 @@
+error[P0001]: unexpected token
+ --> $FILE:1:14
+  |
+1 | function f(a b): Int {
+  |              ^ expected `)` or `,`, found identifier `b`
+  |
+  = note: while parsing a function declaration
+  = note: inside the `(` opened here
+
+error[P0001]: unexpected token
+ --> $FILE:2:13
+  |
+2 |     let x = ;
+  |             ^ expected an expression, found `;`
+  |
+  = note: while parsing an expression
+  = note: an expression is a literal, a name, or one of `(`, `[`, `{`, `if`, `match`
+
+error[P0001]: unexpected token
+ --> $FILE:4:5
+  |
+4 |     return x;
+  |     ^^^^^^ expected `;`, found keyword `return`
+  |
+  = note: while parsing a `let` declaration
+  = help: statements are terminated with `;`

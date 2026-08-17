@@ -23,6 +23,8 @@ module Parser.Token
     keywordTable,
     punctText,
     punctTable,
+    isOpener,
+    isCloser,
     startsStatement,
     describeKind,
     describeExpected,
@@ -186,6 +188,25 @@ punctText = \case
 -- scannerless grammar used to see them.
 punctTable :: [(Text, Punct)]
 punctTable = sortOn (Down . T.length . fst) [(punctText p, p) | p <- [minBound .. maxBound]]
+
+-- | The bracketing delimiters, which recovery has to keep balanced when it
+-- skips over a region it has given up on.
+--
+-- @\<@ and @\>@ are deliberately excluded: they are also comparison operators,
+-- so counting them would treat @a \< b@ as an unclosed group.
+isOpener :: Punct -> Bool
+isOpener = \case
+  LParen -> True
+  LBrace -> True
+  LBracket -> True
+  _ -> False
+
+isCloser :: Punct -> Bool
+isCloser = \case
+  RParen -> True
+  RBrace -> True
+  RBracket -> True
+  _ -> False
 
 -- | Keywords that may begin a statement. Used both to dispatch in the
 -- statement parser and as the synchronisation set for panic-mode recovery.

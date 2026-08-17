@@ -1,0 +1,7 @@
+error[P0003]: expected a function type
+ --> $FILE:1:27
+  |
+1 | function foo(f: (Int, Int)) {
+  |                           ^ expected `->` after a parenthesised parameter list
+  |
+  = note: while parsing a function declaration

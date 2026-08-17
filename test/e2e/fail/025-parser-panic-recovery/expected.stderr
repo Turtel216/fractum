@@ -1,0 +1,17 @@
+error[P0001]: unexpected token
+ --> $FILE:4:16
+  |
+4 |     return a + ;
+  |                ^ expected an expression, found `;`
+  |
+  = note: while parsing an expression
+  = note: an expression is a literal, a name, or one of `(`, `[`, `{`, `if`, `match`
+
+error[P0001]: unexpected token
+  --> $FILE:11:19
+   |
+11 | function foobar(a b) { 
+   |                   ^ expected `)` or `,`, found identifier `b`
+   |
+   = note: while parsing a function declaration
+   = note: inside the `(` opened here

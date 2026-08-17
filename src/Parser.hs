@@ -54,7 +54,7 @@ module Parser
 where
 
 import Ast
-import Control.Monad (void, when)
+import Control.Monad (unless, void, when)
 import Control.Monad.State.Strict (gets)
 import Data.Functor (($>))
 import Data.Text (Text)
@@ -107,15 +107,10 @@ data TrailingSep
 
 -- | @open body close@, annotated with the span covering both delimiters.
 enclosed :: Context -> Punct -> Punct -> Parser a -> Parser (Located a)
-enclosed ctx open close = enclosedWith ctx open close []
-
--- | 'enclosed', naming further tokens that would also have been valid in place
--- of the closing delimiter.
-enclosedWith :: Context -> Punct -> Punct -> [Text] -> Parser a -> Parser (Located a)
-enclosedWith ctx open close alsoValid body = do
+enclosed ctx open close body = do
   opener <- expect ctx (TPunct open)
   x <- body
-  closer <- expectClose ctx open close alsoValid (tokSpan opener)
+  closer <- expectClose ctx open close [] (tokSpan opener)
   pure (Located (spanning (tokSpan opener) (tokSpan closer)) x)
 
 -- | Consume a group's closing delimiter, or explain precisely what is missing.
@@ -142,10 +137,29 @@ expectClose ctx open close alsoValid openSpan = do
 
 -- | @open p sep p sep … close@, annotated with the span covering both
 -- delimiters.
+--
+-- This is also the parser's second recovery point. A group that fails part way
+-- through is skipped to its own closing delimiter and reported as empty, so
+-- the caller resumes exactly where it would have anyway: a function whose
+-- parameter list is malformed still has its body parsed, and any errors in
+-- that body are still reported in the same pass. Only when the closing
+-- delimiter cannot be found — the group runs to end of file, or into a bracket
+-- belonging to an enclosing construct — is the panic passed further up.
 delimited ::
   Context -> Punct -> Punct -> Punct -> TrailingSep -> Parser a -> Parser (Located [a])
-delimited ctx open close sep trailing p =
-  enclosedWith ctx open close ["`" <> punctText sep <> "`"] (sepList close sep trailing p)
+delimited ctx open close sep trailing p = do
+  opener <- expect ctx (TPunct open)
+  outcome <- recover $ do
+    xs <- sepList close sep trailing p
+    closer <- expectClose ctx open close ["`" <> punctText sep <> "`"] (tokSpan opener)
+    pure (xs, tokSpan closer)
+  case outcome of
+    Just (xs, closeSpan) -> pure (Located (spanning (tokSpan opener) closeSpan) xs)
+    Nothing -> do
+      closed <- skipToClose close
+      unless closed panic
+      end <- gets psPrevEnd
+      pure (Located (tokSpan opener) {spanEnd = end} [])
 
 -- | The contents of a 'delimited' group, stopping before the closing token.
 sepList :: Punct -> Punct -> TrailingSep -> Parser a -> Parser [a]
@@ -196,21 +210,29 @@ pFieldName ctx = do
 --------------------------------------------------------------------------------
 
 pProgram :: Parser Program
-pProgram = Program <$> stmtsUntil atEof
+pProgram = Program <$> stmtsUntil TopLevel
 
--- | Parse statements until @stop@ holds, recovering from any that fail.
+-- | Parse statements until the end of the enclosing region, recovering from
+-- any that fail.
 --
 -- This is the loop that makes multiple-error reporting work. A statement that
 -- panics costs exactly one diagnostic: it is dropped, the stream is
 -- resynchronised, and the next statement is parsed as if nothing had happened.
 -- The 'psConsumed' comparison guarantees forward progress even when both the
 -- failed statement and the resynchronisation consumed nothing.
-stmtsUntil :: Parser Bool -> Parser [LStmt]
-stmtsUntil stop = go
+--
+-- 'Nesting' says where the region ends, and is handed to 'synchronize' so that
+-- panic mode treats a @}@ the same way the loop itself does.
+stmtsUntil :: Nesting -> Parser [LStmt]
+stmtsUntil nesting = go
   where
     go = do
-      done <- stop
+      done <- atEnd
       if done then pure [] else step
+
+    atEnd = case nesting of
+      TopLevel -> atEof
+      InsideBlock -> (||) <$> check (TPunct RBrace) <*> atEof
 
     step = do
       before <- gets psConsumed
@@ -218,7 +240,7 @@ stmtsUntil stop = go
       case outcome of
         Just s -> (s :) <$> go
         Nothing -> do
-          synchronize
+          synchronize nesting
           after <- gets psConsumed
           eof <- atEof
           when (after == before && not eof) (void advance)
@@ -248,14 +270,9 @@ pStmt =
 pBlock :: Context -> Parser Block
 pBlock ctx = do
   opener <- expect ctx (TPunct LBrace)
-  stmts <- stmtsUntil endOfBlock
+  stmts <- stmtsUntil InsideBlock
   _ <- expectClose ctx LBrace RBrace [] (tokSpan opener)
   pure (Block stmts)
-  where
-    endOfBlock = do
-      closing <- check (TPunct RBrace)
-      eof <- atEof
-      pure (closing || eof)
 
 -- | @let x = e;@, @let mut x: T = e;@
 pLet :: Parser Stmt

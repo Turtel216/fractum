@@ -151,13 +151,23 @@ scanNumber file st = emit file (TIntLit value) digits st
 
 -- | A string literal delimited by @\"@ or @'@. There are no escape sequences
 -- in the language yet, so the literal simply runs to the next matching quote.
+--
+-- A literal with no closing quote is reported and then recovered rather than
+-- abandoned: it ends at the end of its line, and a 'TStrLit' is emitted for
+-- what was read. Both halves of that matter. Running to end of file instead
+-- would put a caret under the whole remainder of the source and leave nothing
+-- after it to lex, and dropping the token would make the parser complain a
+-- second time about the expression that is now missing.
 scanString :: FilePath -> Char -> LexState -> LexState
 scanString file quote st
-  | T.null after = eat (lsRest st) (report file UnterminatedString (lsRest st) st)
+  | T.null after = emit file (TStrLit unclosed) opened (report file UnterminatedString opened st)
   | otherwise = emit file (TStrLit body) (T.concat [q, body, q]) st
   where
     q = T.singleton quote
-    (body, after) = T.break (== quote) (T.drop 1 (lsRest st))
+    contents = T.drop 1 (lsRest st)
+    (body, after) = T.break (== quote) contents
+    unclosed = T.takeWhile (/= '\n') contents
+    opened = T.cons quote unclosed
 
 -- | Maximal-munch punctuation match against the length-ordered table.
 matchPunct :: Text -> Maybe (Text, Punct)

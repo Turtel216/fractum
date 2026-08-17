@@ -22,10 +22,19 @@
 --
 -- == Panic mode
 --
--- A recovery point is any call to 'recover' — in practice, the statement loop.
--- On catching 'Recovering' it calls 'synchronize', which discards tokens until
--- the stream is plausibly at the start of another statement (after a @;@, at a
--- @}@, or at a statement keyword). Parsing then resumes normally.
+-- A recovery point is any call to 'recover' — in practice, the statement loop
+-- and each bracketed group. On catching 'Recovering' the statement loop calls
+-- 'synchronize', which discards tokens until the stream is plausibly at the
+-- start of another statement (after a @;@, at a statement keyword, or past the
+-- @{ … }@ body of the construct that failed). A bracketed group instead calls
+-- 'skipToClose' and carries on immediately after its own closing delimiter, so
+-- that a malformed parameter list does not cost the diagnostics in the body
+-- that follows it.
+--
+-- Both are structure-aware on purpose. Resuming in the middle of a block whose
+-- header failed would parse that block's statements at the wrong nesting level
+-- and then report its closing @}@ as an unexpected token — a second error for
+-- what is really one mistake.
 --
 -- 'psConsumed' exists purely to let the statement loop prove it is making
 -- progress: if a failed statement plus a synchronise consumed nothing at all,
@@ -60,10 +69,13 @@ module Parser.Monad
     isUpperName,
 
     -- * Errors and recovery
+    Nesting (..),
     parseError,
     parseErrorWith,
     recordError,
     recover,
+    panic,
+    skipToClose,
     synchronize,
   )
 where
@@ -319,19 +331,27 @@ parseErrorWith ctx kind notes = do
 -- | Record an error without abandoning the parse, for the cases where the
 -- parser can sensibly keep going.
 --
--- Errors at a position that already has one are dropped. After a failure the
--- parser is by definition confused, and a cascade of complaints about the same
--- token is noise rather than information.
+-- Two kinds of follow-on noise are dropped here. After a failure the parser is
+-- by definition confused, so a second complaint about the same token says
+-- nothing new; and an @expected …, found end of file@ in a file that already
+-- has an error is a report that the source ran out while the parser was
+-- lost, not a report of an independent mistake. A genuinely unclosed
+-- delimiter is a different diagnostic ('UnclosedDelimiter') and still stands
+-- on its own at end of file.
 recordError :: Context -> ParseErrorKind -> [Note] -> Parser ()
 recordError (Context what) kind notes = do
   st <- get
   let sp = tokSpan (psCurrent st)
       err = ParseError sp kind (NoteText ("while parsing " <> what) : notes)
-  unless (alreadyReportedAt sp (psErrors st)) $
-    put st {psErrors = err : psErrors st}
+      redundant = alreadyReportedAt sp (psErrors st) || ranOut st
+  unless redundant $ put st {psErrors = err : psErrors st}
   where
     alreadyReportedAt sp (e : _) = spanStart (peSpan e) == spanStart sp
     alreadyReportedAt _ [] = False
+
+    ranOut st = case (kind, tokKind (psCurrent st)) of
+      (UnexpectedToken _ _, TEof) -> not (null (psErrors st))
+      _ -> False
 
 -- | Describe the lookahead token for an @…, found X@ message.
 describeFound :: Parser Text
@@ -341,18 +361,76 @@ describeFound = describeKind <$> peekKind
 recover :: Parser a -> Parser (Maybe a)
 recover p = (Just <$> p) `catchError` \Recovering -> pure Nothing
 
+-- | Abandon the current construct without recording anything new, for the
+-- cases where the diagnostic is already in 'psErrors' and only the unwinding
+-- is still wanted.
+panic :: Parser a
+panic = throwError Recovering
+
+-- | Whether the statement loop being recovered is a file's top level or the
+-- inside of a @{ … }@ block. It decides what a @}@ means during panic mode:
+-- inside a block it terminates the loop, at the top level it closes nothing
+-- and is discarded.
+data Nesting = TopLevel | InsideBlock
+  deriving stock (Eq, Show)
+
+-- | Discard tokens up to and including the delimiter that closes the group the
+-- parser is currently inside, reporting whether it was found.
+--
+-- Nested bracketed groups are skipped whole, and a closing delimiter belonging
+-- to an /enclosing/ group stops the scan without being consumed — recovery
+-- must never eat a bracket that an outer construct is still waiting for. A
+-- 'False' result therefore means the caller cannot resume locally and should
+-- 'panic' on to the next recovery point.
+skipToClose :: Punct -> Parser Bool
+skipToClose close = go (0 :: Int)
+  where
+    go depth =
+      peekKind >>= \case
+        TEof -> pure False
+        TPunct p
+          | p == close && depth == 0 -> advance $> True
+          | isOpener p -> advance >> go (depth + 1)
+          | isCloser p && depth == 0 -> pure False
+          | isCloser p -> advance >> go (depth - 1)
+        _ -> advance >> go depth
+
+-- | Discard a whole balanced @{ … }@ group, the lookahead being its @{@.
+skipBlock :: Parser ()
+skipBlock = advance >> go (0 :: Int)
+  where
+    go depth =
+      peekKind >>= \case
+        TEof -> pure ()
+        TPunct LBrace -> advance >> go (depth + 1)
+        TPunct RBrace
+          | depth == 0 -> void advance
+          | otherwise -> advance >> go (depth - 1)
+        _ -> advance >> go depth
+
 -- | Panic mode. Discard tokens until the stream is plausibly at the start of
 -- the next statement.
 --
--- A @;@ is consumed (it terminated the statement we gave up on), while a @}@
--- and any statement keyword are left in place for the enclosing block or
--- statement loop to handle.
-synchronize :: Parser ()
-synchronize = do
-  t <- peek
-  case tokKind t of
-    TEof -> pure ()
-    TPunct Semi -> void advance
-    TPunct RBrace -> pure ()
-    TKw k | startsStatement k -> pure ()
-    _ -> advance >> synchronize
+-- A @;@ is consumed, since it terminated the statement we gave up on, and any
+-- statement keyword is left in place to be parsed as the next statement.
+--
+-- The other two cases exist to stop one syntax error from being reported
+-- twice. A @{@ opens the body of the construct that just failed — a function
+-- whose parameter list was malformed, say — so the whole balanced group is
+-- discarded with it; resuming inside that body would parse its statements at
+-- the wrong nesting level and then blame its closing @}@ for being unexpected.
+-- A @}@ at the top level is the other half of the same situation: nothing is
+-- open for it to close, so it is dropped rather than reported.
+synchronize :: Nesting -> Parser ()
+synchronize nesting = go
+  where
+    go =
+      peekKind >>= \case
+        TEof -> pure ()
+        TPunct Semi -> void advance
+        TPunct LBrace -> skipBlock
+        TPunct RBrace -> case nesting of
+          InsideBlock -> pure ()
+          TopLevel -> advance >> go
+        TKw k | startsStatement k -> pure ()
+        _ -> advance >> go

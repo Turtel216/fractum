@@ -1,0 +1,6 @@
+error[P0005]: unterminated block comment
+ --> $FILE:1:1
+  |
+1 | /* Hello there 
+  | ^^ this block comment is missing its closing `*/`
+  |

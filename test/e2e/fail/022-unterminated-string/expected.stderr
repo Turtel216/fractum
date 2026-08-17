@@ -1,0 +1,6 @@
+error[P0004]: unterminated string literal
+ --> $FILE:1:9
+  |
+1 | let x = "Hello there 
+  |         ^^^^^^^^^^^^^ this string literal is missing its closing quote
+  |

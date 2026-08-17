@@ -1,0 +1,7 @@
+error[P0002]: unclosed delimiter
+ --> $FILE:4:1
+  |
+  | expected `}` to close this `{`
+  |
+  = note: while parsing a function declaration
+  = note: the `{` opened here is never closed
