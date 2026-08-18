@@ -40,6 +40,7 @@ substSurfaceType m = go
 fromSurfaceType :: Type -> Infer IType
 fromSurfaceType = \case
   TInt -> pure TIntT
+  TFloat -> pure TFloatT
   TBool -> pure TBoolT
   TString -> pure TStringT
   TVar _ -> fresh -- surface named vars treated as fresh unknowns
@@ -78,6 +79,7 @@ toSurfaceType :: IType -> Type
 toSurfaceType = \case
   TV n -> TVar (T.pack ("_tv" <> show n))
   TIntT -> TInt
+  TFloatT -> TFloat
   TBoolT -> TBool
   TStringT -> TString
   TNullT -> TVar "_null" -- no surface Null type; use a placeholder

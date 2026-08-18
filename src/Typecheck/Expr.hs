@@ -30,6 +30,7 @@ inferExpr env (Located sp expr) = withCurrentSpan sp $ case expr of
       Just (sch, _) -> instantiate sch
   ELit l -> case l of
     LInt _ -> pure TIntT
+    LFloat _ -> pure TFloatT
     LBool _ -> pure TBoolT
     LString _ -> pure TStringT
     LNull -> pure TNullT
@@ -102,7 +103,11 @@ inferExpr env (Located sp expr) = withCurrentSpan sp $ case expr of
   EUnary op e -> do
     t <- inferExpr env e
     case op of
-      Neg -> unify t TIntT >> pure TIntT
+      Neg -> do
+        t' <- zonk t
+        case t' of
+          TFloatT -> pure TFloatT
+          _ -> unify t TIntT >> pure TIntT
       Not -> unify t TBoolT >> pure TBoolT
   EBinary op a b -> do
     ta <- inferExpr env a
@@ -122,7 +127,19 @@ inferExpr env (Located sp expr) = withCurrentSpan sp $ case expr of
       And -> boolBool ta tb
       Or -> boolBool ta tb
     where
-      numNum ta tb = unify ta TIntT >> unify tb TIntT >> pure TIntT
+      -- \| Int + Int -> Int and Float + Float -> Float, but never a mix of
+      -- the two: unifying a concrete Int with a concrete Float is a genuine
+      -- type mismatch, exactly as it should be for a language with no
+      -- implicit numeric coercion. Only an unresolved type variable is ever
+      -- pulled toward Float this way; a fixed operand of the wrong kind
+      -- fails through 'unify' below.
+      numNum ta tb = do
+        ta' <- zonk ta
+        tb' <- zonk tb
+        case (ta', tb') of
+          (TFloatT, _) -> unify tb TFloatT >> pure TFloatT
+          (_, TFloatT) -> unify ta TFloatT >> pure TFloatT
+          _ -> unify ta TIntT >> unify tb TIntT >> pure TIntT
 
       -- \| The '+' operator supports both Int + Int -> Int and String + String -> String.
       -- If either operand is known to be a String, unify both as String.
@@ -136,9 +153,32 @@ inferExpr env (Located sp expr) = withCurrentSpan sp $ case expr of
 
       boolBool ta tb = unify ta TBoolT >> unify tb TBoolT >> pure TBoolT
 
-      ordBool ta tb = unify ta TIntT >> unify tb TIntT >> pure TBoolT
+      ordBool ta tb = do
+        ta' <- zonk ta
+        tb' <- zonk tb
+        case (ta', tb') of
+          (TFloatT, _) -> unify tb TFloatT >> pure TBoolT
+          (_, TFloatT) -> unify ta TFloatT >> pure TBoolT
+          _ -> unify ta TIntT >> unify tb TIntT >> pure TBoolT
 
       eqBool ta tb = unify ta tb >> pure TBoolT
+  -- \| Explicit `as` conversion: only ever between 'Int' and 'Float', never
+  -- an implicit coercion elsewhere in the language. An operand whose type is
+  -- still an unresolved type variable defaults to 'Int', matching the
+  -- default numeric literals already get elsewhere in inference.
+  ECast e ty -> do
+    te <- zonk =<< inferExpr env e
+    tgt <- fromSurfaceType ty
+    te' <- case te of
+      TV _ -> unify te TIntT >> pure TIntT
+      other -> pure other
+    case (te', tgt) of
+      (TIntT, TFloatT) -> pure TFloatT
+      (TFloatT, TIntT) -> pure TIntT
+      (TIntT, TIntT) -> pure TIntT
+      (TFloatT, TFloatT) -> pure TFloatT
+      _ -> throwSpanned (InvalidCast te' tgt) []
+
   EIfExpr c t f -> do
     tc <- inferExpr env c
     unify tc TBoolT

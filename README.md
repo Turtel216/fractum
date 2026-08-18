@@ -72,6 +72,29 @@ let a: Int = 42;
 let mut b: Int = 0;
 ```
 
+### Numeric Types and Explicit Casting
+
+`Int` and `Float` are distinct types with no implicit coercion between them:
+an arithmetic or comparison operator requires both operands to already be the
+same numeric type. Converting between them requires an explicit Rust-style
+`as` cast.
+
+```typescript
+let x = 5.5;       // Float
+let y = 7;          // Int
+
+// let bad = x + y;  // TYPE ERROR: `+` expects both operands to be `Float`
+
+let z = x + y as Float;  // `as` binds tighter than `+`, so this is `x + (y as Float)`
+```
+
+Casting `Float` to `Int` truncates towards zero, matching Rust's `as`:
+
+```typescript
+let n = 9.9 as Int;   // 9
+let m = -9.9 as Int;  // -9
+```
+
 ### Functions and Lambdas
 
 Functions can be declared using standard function syntax or arrow functions (lambdas). Type inference handles missing annotations where possible.
@@ -262,8 +285,14 @@ values; `Sub<Msg>` (`stdlib/Sub.fr`) describes standing subscriptions such as
 animation frames, key presses, and window resizes. `Option<T>` and `Result<T, E>`
 (`stdlib/Option.fr`, `stdlib/Result.fr`) round out the library and are used
 throughout to keep `null`/`undefined` and thrown exceptions out of application code.
-See `examples/Counter.fr` for a complete, runnable application.
 
+<!--
+Two runnable applications ship with the compiler: `examples/counter/` is the
+smallest complete Elm-architecture program, and `examples/taskboard/` is a
+five-module task board that exercises the rest of the surface, including keyed
+list reordering, every sanitized event handler, commands for storage, timers,
+randomness and HTTP, and subscriptions that start and stop with the model.
+-->
 ## Diagnostics and Error Reporting
 
 Fractum features a detailed diagnostic engine. Below is a catalog of currently implemented error codes:
@@ -286,6 +315,7 @@ Fractum features a detailed diagnostic engine. Below is a catalog of currently i
 | E0014 | Module not found     | cannot find module `./missing`                         |
 | E0015 | Unbound import       | module `./math` has no exported member `sub`           |
 | E0016 | Circular import      | modules form a cycle: `a.fr -> b.fr -> a.fr`         |
+| E0017 | Invalid cast         | cannot cast `Bool` to `Int` -- only conversions between `Int` and `Float` are supported |
 | E0099 | Internal / General   | raw message                                            |
 
 ## Roadmap and Current Limitations

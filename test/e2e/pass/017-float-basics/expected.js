@@ -1,0 +1,12 @@
+const pi = 3.5;
+const radius = 2.0;
+const area = pi * radius * radius;
+console.log(area);
+let total = 0.5;
+total = total + 1.25;
+console.log(total);
+console.log(-pi);
+console.log(pi < 4.0);
+console.log(pi > 4.0);
+const e = 2.71;
+console.log(e);

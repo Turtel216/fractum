@@ -139,6 +139,7 @@ binPrec op
 ppLit :: J.JSLit -> Text
 ppLit = \case
   J.JSInt n -> T.pack (show n)
+  J.JSFloat n -> T.pack (show n)
   J.JSBool True -> "true"
   J.JSBool False -> "false"
   J.JSString s -> "\"" <> escape s <> "\""

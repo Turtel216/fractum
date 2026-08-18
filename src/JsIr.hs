@@ -44,6 +44,7 @@ data JSExpr
 -- | Untyped Javascript Literal IR
 data JSLit
   = JSInt Integer
+  | JSFloat Double
   | JSBool Bool
   | JSString Text
   | JSNull

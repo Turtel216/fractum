@@ -1,0 +1,2 @@
+let flag = true;
+let n = flag as Int;

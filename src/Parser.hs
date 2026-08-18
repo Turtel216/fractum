@@ -492,7 +492,7 @@ pExpr = pExprBp 0
 -- | Parse an expression, folding in every infix operator that binds at least
 -- as tightly as @minBp@.
 pExprBp :: Int -> Parser LExpr
-pExprBp minBp = pUnary >>= loop
+pExprBp minBp = pCast >>= loop
   where
     loop lhs =
       peekKind >>= \k -> case infixOp k of
@@ -502,6 +502,23 @@ pExprBp minBp = pUnary >>= loop
           let node = buildInfix (opNode op) lhs rhs
           loop (Located (spanning (locSpan lhs) (locSpan rhs)) node)
         _ -> pure lhs
+
+-- | @e as T@, binding tighter than every infix operator but looser than
+-- unary prefix and the postfix chain, so @x + y as Float@ is @x + (y as
+-- Float)@ and @-x as Float@ is @(-x) as Float@. Right-associative by simply
+-- looping: @x as Int as Float@ reads as @(x as Int) as Float@.
+pCast :: Parser LExpr
+pCast = pUnary >>= loop
+  where
+    loop e = do
+      isAs <- match (TKw KwAs)
+      if not isAs
+        then pure e
+        else do
+          ty <- pTypeAtom ctx
+          end <- gets psPrevEnd
+          loop (Located (locSpan e) {spanEnd = end} (ECast e ty))
+    ctx = Context "a type cast"
 
 -- | Prefix @!@ and @-@, which bind tighter than every infix operator: @-a * b@
 -- is @(-a) * b@ and @-f(x)@ is @-(f(x))@.
@@ -551,6 +568,7 @@ pPrimary =
     TKw KwFalse -> literal (LBool False)
     TKw KwNull -> literal LNull
     TIntLit n -> literal (LInt n)
+    TFloatLit n -> literal (LFloat n)
     TStrLit s -> literal (LString s)
     TKw KwIf -> withSpan pIfExpr
     TKw KwMatch -> withSpan pMatchExpr
@@ -718,6 +736,7 @@ pTypeAtom :: Context -> Parser Type
 pTypeAtom ctx =
   peekKind >>= \case
     TKw KwInt -> advance $> TInt
+    TKw KwFloat -> advance $> TFloat
     TKw KwBool -> advance $> TBool
     TKw KwString -> advance $> TString
     TPunct LBracket -> TArray . locVal <$> enclosed ctx LBracket RBracket (pType ctx)

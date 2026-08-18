@@ -1,0 +1,6 @@
+error[E0001]: type mismatch
+ --> $FILE:3:9
+  |
+3 | let z = x + y;
+  |         ^^^^^ expected `Float`, found `Int`
+  |

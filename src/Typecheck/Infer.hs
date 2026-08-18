@@ -144,6 +144,7 @@ unifyStructural t1 t2 = case (t1, t2) of
   (TV v, t) -> bind v t
   (t, TV v) -> bind v t
   (TIntT, TIntT) -> pure emptySubst
+  (TFloatT, TFloatT) -> pure emptySubst
   (TBoolT, TBoolT) -> pure emptySubst
   (TStringT, TStringT) -> pure emptySubst
   (TNullT, TNullT) -> pure emptySubst

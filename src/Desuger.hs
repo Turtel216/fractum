@@ -7,10 +7,10 @@ module Desuger where
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified JsIr as J
-import Ast 
+import Ast
   ( Program(..), Stmt(..), Expr(..), Literal(..), Param(..), Arg(..), Block(..)
   , BinOp(..), UnOp(..), Mutability(..), Located(..), LExpr, LStmt
-  , MatchArm(..), Pattern(..)
+  , MatchArm(..), Pattern(..), Type(..)
   )
 
 -- | Type erasure + structural lowering from TypedJS AST to JS AST.
@@ -126,6 +126,13 @@ lowerExpr (Located _ expr) = case expr of
         armStmts = concatMap lowerMatchArm arms
     in J.JSIife (J.JSBlock (bindScrut : armStmts))
 
+  -- | JS has a single number type, so a cast is either a no-op (Int -> Float,
+  -- or casting to the type an expression already has) or, going the other
+  -- way, an explicit truncation towards zero to match the value an Int
+  -- actually holds.
+  ECast e TInt -> J.JSCall (J.JSMember (J.JSVar "Math") "trunc") [lowerExpr e]
+  ECast e _    -> lowerExpr e
+
 -- | Lower a single match arm to a list of JS statements.
 -- Variant arms become: if (_m._tag === "Foo") { const x = _m._0; ... return body; }
 -- Wildcard arms become: return body;
@@ -154,6 +161,7 @@ lowerArg (Arg e) = lowerExpr e
 lowerLit :: Literal -> J.JSLit
 lowerLit = \case
   LInt n    -> J.JSInt n
+  LFloat n  -> J.JSFloat n
   LBool b   -> J.JSBool b
   LString s -> J.JSString s
   LNull     -> J.JSNull

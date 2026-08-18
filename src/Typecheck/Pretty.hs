@@ -25,6 +25,7 @@ prettyType :: IType -> Text
 prettyType = \case
   TV n -> prettyTVar n
   TIntT -> "Int"
+  TFloatT -> "Float"
   TBoolT -> "Bool"
   TStringT -> "String"
   TNullT -> "Null"

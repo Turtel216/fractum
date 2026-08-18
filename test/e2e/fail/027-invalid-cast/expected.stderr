@@ -1,0 +1,6 @@
+error[E0017]: invalid cast
+ --> $FILE:2:9
+  |
+2 | let n = flag as Int;
+  |         ^^^^^^^^^^^ cannot cast `Bool` to `Int` -- only conversions between `Int` and `Float` are supported
+  |

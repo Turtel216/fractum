@@ -1,0 +1,27 @@
+// Explicit `as` conversion is required to mix Int and Float in one
+// expression; there is no implicit up/down casting between them.
+let x = 5.5;
+let y = 7;
+
+let z = x + y as Float;
+print(z);
+
+// Float -> Int truncates towards zero, like Rust's `as`.
+let truncated = 9.9 as Int;
+print(truncated);
+print(-9.9 as Int);
+
+// Int -> Float widens the value.
+let widened = 3 as Float;
+print(widened);
+
+// A cast to the type an expression already has is a legal no-op.
+let sameFloat = 1.5 as Float;
+let sameInt = 1 as Int;
+print(sameFloat);
+print(sameInt);
+
+function average(a: Int, b: Int): Float {
+  return (a as Float + b as Float) / 2.0;
+}
+print(average(3, 4));

@@ -86,6 +86,7 @@ data Expr
   | EParens LExpr
   | EVariant Name Name [LExpr]  -- ^ e.g. Shape::Circle(5, 10)
   | EMatch LExpr [MatchArm]    -- ^ e.g. match (expr) { arms }
+  | ECast LExpr Type           -- ^ e.g. x as Float
   deriving (Eq, Show)
 
 -- | A single arm in a match expression
@@ -101,6 +102,7 @@ data Pattern
 -- | Literals
 data Literal
   = LInt Integer
+  | LFloat Double
   | LBool Bool
   | LString Text
   | LNull
@@ -122,6 +124,7 @@ data BinOp
 -- | Language types
 data Type
   = TInt
+  | TFloat
   | TBool
   | TString
   | TVar Name

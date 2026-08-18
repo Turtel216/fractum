@@ -62,6 +62,8 @@ data TypeErrorKind
     UnboundImport Text Text
   | -- | cycle of module paths
     CircularImport [Text]
+  | -- | (source type, target type) of an unsupported `as` cast
+    InvalidCast IType IType
   | OtherError Text
   deriving (Eq, Show)
 
@@ -94,6 +96,7 @@ errorCode = \case
   ModuleNotFound {} -> "E0014"
   UnboundImport {} -> "E0015"
   CircularImport {} -> "E0016"
+  InvalidCast {} -> "E0017"
   OtherError {} -> "E0099"
 
 -- | Short human-readable title for the error kind.
@@ -115,6 +118,7 @@ errorTitle = \case
   ModuleNotFound {} -> "module not found"
   UnboundImport {} -> "no exported member"
   CircularImport {} -> "circular import"
+  InvalidCast {} -> "invalid cast"
   OtherError {} -> "type error"
 
 -- | Detailed message shown under the source underline.
@@ -167,4 +171,10 @@ errorDetail = \case
     "module `" <> path <> "` has no exported member `" <> name <> "`"
   CircularImport cyclePath ->
     "modules form a cycle: " <> T.intercalate " -> " cyclePath
+  InvalidCast from to ->
+    "cannot cast `"
+      <> prettyType from
+      <> "` to `"
+      <> prettyType to
+      <> "` -- only conversions between `Int` and `Float` are supported"
   OtherError msg -> msg

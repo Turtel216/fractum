@@ -1,0 +1,276 @@
+// ==========================================
+// Task.fr
+// The domain: what a task is and what can be done to a board of them
+// ==========================================
+//
+// This module is pure data and pure functions. It knows nothing about messages,
+// commands, or the DOM, which means every function in here can be reasoned
+// about (and reused) on its own. The application layer in Model.fr is what
+// turns a user message into one of these calls.
+
+import {
+    List,
+    list_cons,
+    list_nil,
+    list_map,
+    list_filter,
+    list_fold_left,
+    list_length,
+    list_append,
+    list_find,
+    list_any
+} from "../../stdlib/Functional";
+import { Option } from "../../stdlib/Option";
+import { Result } from "../../stdlib/Result";
+import { percent } from "./Util";
+
+// ---------------------------------------------------------
+// Types
+// ---------------------------------------------------------
+
+// How much a task matters. Modelling this as an enum rather than an Int means
+// the compiler rejects a board that has drifted into an impossible state, and
+// every match over a Priority has to account for all three cases.
+export enum Priority {
+    Low,
+    Medium,
+    High,
+}
+
+// A task is a plain structural record. There is no class, no constructor and
+// no hidden state: values of this type are built and taken apart by the
+// functions below.
+export type Task = { id: Int, title: String, priority: Priority, done: Bool };
+
+// Which slice of the board the user is currently looking at.
+export enum Filter {
+    All,
+    Active,
+    Done,
+}
+
+// ---------------------------------------------------------
+// Priority
+// ---------------------------------------------------------
+
+export function make_task(id: Int, title: String, priority: Priority): Task {
+    return { id: id, title: title, priority: priority, done: false };
+}
+
+export function priority_name(p: Priority): String {
+    return match (p) {
+        Priority::Low => "Low",
+        Priority::Medium => "Medium",
+        Priority::High => "High",
+    };
+}
+
+export function priority_class(p: Priority): String {
+    return match (p) {
+        Priority::Low => "badge badge-low",
+        Priority::Medium => "badge badge-medium",
+        Priority::High => "badge badge-high",
+    };
+}
+
+// A rough weight for the effort readout in the stats panel.
+export function priority_weight(p: Priority): Int {
+    return match (p) {
+        Priority::Low => 1,
+        Priority::Medium => 2,
+        Priority::High => 3,
+    };
+}
+
+// Low, then Medium, then High, then back to Low. Used by the badge on each
+// row, which cycles the priority when clicked.
+export function priority_next(p: Priority): Priority {
+    return match (p) {
+        Priority::Low => Priority::Medium,
+        Priority::Medium => Priority::High,
+        Priority::High => Priority::Low,
+    };
+}
+
+// Parses the raw String the runtime hands back from a select element. Anything
+// unrecognised falls back to Low, so a stray value from the outside world can
+// never produce an invalid Priority.
+export function priority_from_name(name: String): Priority {
+    return if (name == "High")
+        Priority::High
+    else if (name == "Medium")
+        Priority::Medium
+    else
+        Priority::Low;
+}
+
+// ---------------------------------------------------------
+// Filters
+// ---------------------------------------------------------
+//
+// Enum values are compiled to fresh objects, so two Filter values are compared
+// through this small projection into Int rather than with `==` directly.
+
+export function filter_index(f: Filter): Int {
+    return match (f) {
+        Filter::All => 0,
+        Filter::Active => 1,
+        Filter::Done => 2,
+    };
+}
+
+export function filter_is(a: Filter, b: Filter): Bool {
+    return filter_index(a) == filter_index(b);
+}
+
+export function filter_name(f: Filter): String {
+    return match (f) {
+        Filter::All => "All",
+        Filter::Active => "Active",
+        Filter::Done => "Done",
+    };
+}
+
+export function filter_empty_message(f: Filter): String {
+    return match (f) {
+        Filter::All => "The board is empty. Add the first task above.",
+        Filter::Active => "Nothing left to do. Every task is finished.",
+        Filter::Done => "No task has been finished yet.",
+    };
+}
+
+// ---------------------------------------------------------
+// Queries over a board
+// ---------------------------------------------------------
+
+export function visible_tasks(tasks: List<Task>, f: Filter): List<Task> {
+    return match (f) {
+        Filter::All => tasks,
+        Filter::Active => list_filter(tasks, (t: Task) => !t.done),
+        Filter::Done => list_filter(tasks, (t: Task) => t.done),
+    };
+}
+
+export function count_done(tasks: List<Task>): Int {
+    return list_length(list_filter(tasks, (t: Task) => t.done));
+}
+
+export function count_active(tasks: List<Task>): Int {
+    return list_length(tasks) - count_done(tasks);
+}
+
+// Completion as a percentage. Int and Float never mix implicitly, so the
+// conversion happens once, inside percent.
+export function completion(tasks: List<Task>): Float {
+    return percent(count_done(tasks), list_length(tasks));
+}
+
+// Total weight of everything still outstanding.
+export function remaining_effort(tasks: List<Task>): Int {
+    return list_fold_left(
+        list_filter(tasks, (t: Task) => !t.done),
+        0,
+        (acc: Int, t: Task) => acc + priority_weight(t.priority)
+    );
+}
+
+export function find_task(tasks: List<Task>, id: Int): Option<Task> {
+    return list_find(tasks, (t: Task) => t.id == id);
+}
+
+// The nth task, counting from zero. Used to turn the random index the runtime
+// produces into an actual task, and Option is what makes an out of range index
+// harmless.
+export function task_at(tasks: List<Task>, index: Int): Option<Task> {
+    return match (tasks) {
+        List::Nil => Option::None,
+        List::Cons(head, tail) => if (index <= 0)
+            Option::Some(head)
+        else
+            task_at(tail, index - 1),
+    };
+}
+
+// ---------------------------------------------------------
+// Transformations
+// ---------------------------------------------------------
+//
+// Every function below returns a brand new list. Nothing is mutated in place,
+// which is what lets the virtual DOM diff two renders against each other and
+// what makes the update loop trivially replayable.
+
+export function add_task(tasks: List<Task>, task: Task): List<Task> {
+    return list_append(tasks, list_cons(task, list_nil()));
+}
+
+export function toggle_task(tasks: List<Task>, id: Int): List<Task> {
+    return list_map(tasks, (t: Task) => if (t.id == id)
+        { id: t.id, title: t.title, priority: t.priority, done: !t.done }
+    else
+        t);
+}
+
+export function cycle_task_priority(tasks: List<Task>, id: Int): List<Task> {
+    return list_map(tasks, (t: Task) => if (t.id == id)
+        { id: t.id, title: t.title, priority: priority_next(t.priority), done: t.done }
+    else
+        t);
+}
+
+export function delete_task(tasks: List<Task>, id: Int): List<Task> {
+    return list_filter(tasks, (t: Task) => t.id != id);
+}
+
+export function drop_done(tasks: List<Task>): List<Task> {
+    return list_filter(tasks, (t: Task) => !t.done);
+}
+
+// Swaps the identified task with the one in front of it.
+//
+// The two nested matches take the list apart two elements at a time: if the
+// second one is the task being moved, the pair is rebuilt in the other order,
+// otherwise the head is kept and the search continues in the tail. Reordering
+// like this is what the keyed virtual DOM diff is for: the runtime moves the
+// existing DOM nodes instead of rebuilding the rows.
+export function move_task_up(tasks: List<Task>, id: Int): List<Task> {
+    return match (tasks) {
+        List::Nil => List::Nil,
+        List::Cons(first, rest) => match (rest) {
+            List::Nil => tasks,
+            List::Cons(second, tail) => if (second.id == id)
+                List::Cons(second, List::Cons(first, tail))
+            else
+                List::Cons(first, move_task_up(rest, id)),
+        },
+    };
+}
+
+// The mirror image of move_task_up: here it is the first of the pair that is
+// being moved, so the same swap runs when the head matches.
+export function move_task_down(tasks: List<Task>, id: Int): List<Task> {
+    return match (tasks) {
+        List::Nil => List::Nil,
+        List::Cons(first, rest) => match (rest) {
+            List::Nil => tasks,
+            List::Cons(second, tail) => if (first.id == id)
+                List::Cons(second, List::Cons(first, tail))
+            else
+                List::Cons(first, move_task_down(rest, id)),
+        },
+    };
+}
+
+// ---------------------------------------------------------
+// Validation
+// ---------------------------------------------------------
+
+// Result is the return type rather than a thrown exception, so the caller is
+// forced by the exhaustiveness checker to say what happens in both cases.
+export function validate_title(tasks: List<Task>, title: String): Result<String, String> {
+    return if (title == "")
+        Result::Err("A task needs a title before it can be added.")
+    else if (list_any(tasks, (t: Task) => t.title == title))
+        Result::Err(title + " is already on the board.")
+    else
+        Result::Ok(title);
+}

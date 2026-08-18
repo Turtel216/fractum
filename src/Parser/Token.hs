@@ -54,6 +54,7 @@ data Token = Token
 data TokenKind
   = TIdent !Name
   | TIntLit !Integer
+  | TFloatLit !Double
   | TStrLit !Text
   | TKw !Keyword
   | TPunct !Punct
@@ -81,6 +82,7 @@ data Keyword
   | KwFrom
   | KwAs
   | KwInt
+  | KwFloat
   | KwBool
   | KwString
   deriving (Eq, Ord, Show, Enum, Bounded)
@@ -106,6 +108,7 @@ keywordText = \case
   KwFrom -> "from"
   KwAs -> "as"
   KwInt -> "Int"
+  KwFloat -> "Float"
   KwBool -> "Bool"
   KwString -> "String"
 
@@ -228,6 +231,7 @@ describeKind :: TokenKind -> Text
 describeKind = \case
   TIdent n -> "identifier `" <> n <> "`"
   TIntLit n -> "integer literal `" <> tshow n <> "`"
+  TFloatLit n -> "float literal `" <> tshow n <> "`"
   TStrLit _ -> "a string literal"
   TKw k -> "keyword `" <> keywordText k <> "`"
   TPunct p -> "`" <> punctText p <> "`"
@@ -238,6 +242,7 @@ describeExpected :: TokenKind -> Text
 describeExpected = \case
   TIdent _ -> "an identifier"
   TIntLit _ -> "an integer literal"
+  TFloatLit _ -> "a float literal"
   TStrLit _ -> "a string literal"
   TKw k -> "`" <> keywordText k <> "`"
   TPunct p -> "`" <> punctText p <> "`"

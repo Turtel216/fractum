@@ -271,6 +271,7 @@ renameModule valRen tyRen = map renameTop
       EVariant en vn args ->
         EVariant (M.findWithDefault en en tyRen) vn (map (goExpr env) args)
       EMatch scrut arms -> EMatch (goExpr env scrut) (map (goArm env) arms)
+      ECast e ty -> ECast (goExpr env e) (renameType ty)
 
     goArm :: M.Map Name Name -> MatchArm -> MatchArm
     goArm env (MatchArm pat body) = case pat of
@@ -295,6 +296,7 @@ renameModule valRen tyRen = map renameTop
     renameType :: Type -> Type
     renameType = \case
       TInt -> TInt
+      TFloat -> TFloat
       TBool -> TBool
       TString -> TString
       TVar n -> TVar n

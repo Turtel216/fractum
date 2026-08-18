@@ -141,13 +141,35 @@ scanIdent file st = emit file kind word st
     word = T.takeWhile isIdentPart (lsRest st)
     kind = maybe (TIdent word) TKw (M.lookup word keywordTable)
 
--- | A decimal integer literal. Folded rather than @read@ so the scanner stays
--- total.
+-- | A decimal integer or float literal. Folded rather than @read@ so the
+-- scanner stays total.
+--
+-- A @.@ only starts a fractional part when it is followed by at least one
+-- digit: @5.@ lexes as the integer @5@ followed by a @.@ token, leaving
+-- @5.toString@-shaped input to the member-access grammar rather than being
+-- swallowed here.
 scanNumber :: FilePath -> LexState -> LexState
-scanNumber file st = emit file (TIntLit value) digits st
+scanNumber file st
+  | isFloat = emit file (TFloatLit (digitsToDouble intDigits fracDigits)) (intDigits <> "." <> fracDigits) st
+  | otherwise = emit file (TIntLit (digitsToInteger intDigits)) intDigits st
   where
-    digits = T.takeWhile isDigit (lsRest st)
-    value = T.foldl' (\acc c -> acc * 10 + toInteger (fromEnum c - fromEnum '0')) 0 digits
+    intDigits = T.takeWhile isDigit (lsRest st)
+    afterInt = T.drop (T.length intDigits) (lsRest st)
+    fracDigits = T.takeWhile isDigit (T.drop 1 afterInt)
+    isFloat = "." `T.isPrefixOf` afterInt && not (T.null fracDigits)
+
+digitsToInteger :: Text -> Integer
+digitsToInteger = T.foldl' (\acc c -> acc * 10 + toInteger (fromEnum c - fromEnum '0')) 0
+
+-- | Combine a whole-number and fractional digit run into a 'Double'. The
+-- fractional part is folded from the right so each digit is weighted by the
+-- correct negative power of ten purely through repeated division, with no
+-- intermediate 'Integer' magnitude to convert.
+digitsToDouble :: Text -> Text -> Double
+digitsToDouble intDigits fracDigits =
+  fromInteger (digitsToInteger intDigits) + T.foldr (\c acc -> (acc + digitVal c) / 10) 0 fracDigits
+  where
+    digitVal c = fromIntegral (fromEnum c - fromEnum '0')
 
 -- | A string literal delimited by @\"@ or @'@. There are no escape sequences
 -- in the language yet, so the literal simply runs to the next matching quote.

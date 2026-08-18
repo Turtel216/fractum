@@ -1,0 +1,49 @@
+// ==========================================
+// Main.fr
+// The entry point: wiring the four parts together
+// ==========================================
+//
+// Everything the application does lives in the other modules. All that is left
+// here is to declare which outside events the program wants to hear about, and
+// to hand init, update and view to the runtime.
+//
+// Build it with:
+//
+//   fractumc examples/taskboard/Main.fr -o examples/taskboard/out.js
+//
+// The compiler follows the imports itself and emits one readable JavaScript
+// file, so there is no bundler and no module loader involved at runtime.
+
+import { Sub, sub_batch } from "../../stdlib/Sub";
+import { Model, Msg, init, update } from "./Model";
+import { view } from "./View";
+
+// Subscriptions are recomputed from the model after every update, and the
+// runtime starts and stops the underlying listeners to match. The interval
+// below therefore exists only while the clock is running: pausing the timer
+// tears the interval down rather than leaving it ticking into a flag check.
+function subscriptions(model: Model): Sub<Msg> {
+    return sub_batch([
+        if (model.timer.running)
+            Sub::Every(1000, (stamp) => Msg::Ticked(stamp))
+        else
+            Sub::SubNone,
+        // Global keystrokes. Whether they mean anything depends on the model,
+        // which is decided in update rather than here.
+        Sub::OnKeyPress((code) => Msg::KeyPressed(code)),
+        // The language has no tuples, so the runtime hands the two dimensions
+        // over one at a time and the mapper is written curried.
+        Sub::OnWindowResize((width) => (height) => Msg::WindowResized(width, height)),
+    ]);
+}
+
+// app is a compiler builtin that lowers to TypedJS.app in the emitted
+// JavaScript. It mounts on the element with the given id, renders once, and
+// then runs the message loop.
+app({
+    init:          init,
+    update:        update,
+    view:          view,
+    subscriptions: subscriptions,
+    root:          "app",
+});

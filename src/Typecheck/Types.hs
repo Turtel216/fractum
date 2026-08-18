@@ -36,6 +36,7 @@ type TVarId = Int
 data IType
   = TV TVarId
   | TIntT
+  | TFloatT
   | TBoolT
   | TStringT
   | TNullT
@@ -49,6 +50,7 @@ instance Show IType where
   show = \case
     TV n -> "t" <> show n
     TIntT -> "Int"
+    TFloatT -> "Float"
     TBoolT -> "Bool"
     TStringT -> "String"
     TNullT -> "Null"
@@ -88,6 +90,7 @@ instance Types IType where
   ftv = \case
     TV n -> S.singleton n
     TIntT -> mempty
+    TFloatT -> mempty
     TBoolT -> mempty
     TStringT -> mempty
     TNullT -> mempty
@@ -99,6 +102,7 @@ instance Types IType where
   apply (Subst s) t = case t of
     TV n -> M.findWithDefault t n s
     TIntT -> TIntT
+    TFloatT -> TFloatT
     TBoolT -> TBoolT
     TStringT -> TStringT
     TNullT -> TNullT

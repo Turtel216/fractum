@@ -24,6 +24,7 @@ cabal.project.local~
 
 out.js
 example.tjs
+example/taskboard/
 
 # E2E test result
 actual.js

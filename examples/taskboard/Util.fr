@@ -1,0 +1,108 @@
+// ==========================================
+// Util.fr
+// Small helpers shared by the rest of the example
+// ==========================================
+//
+// Everything in here is deliberately generic and knows nothing about the task
+// board itself, so it can be imported by every other module without creating a
+// cycle. The most important function is list_to_array: the virtual DOM takes
+// its children as arrays, while the model stores collections as List<T> (the
+// persistent list from the standard library), so the two representations have
+// to meet somewhere. That somewhere is here.
+
+import { List } from "../../stdlib/Functional";
+
+// ---------------------------------------------------------
+// List / array bridging
+// ---------------------------------------------------------
+
+// Writes v at index i and hands the same array back, so that a chain of
+// writes can be expressed as an expression rather than a statement.
+// Arrays are the one mutable structure in the language, which is exactly why
+// this function is kept private to this module.
+function array_set<T>(arr: [T], i: Int, v: T): [T] {
+    arr[i] = v;
+    return arr;
+}
+
+// Walks the list once, writing every element into out, and returns the number
+// of elements written.
+function fill_array<T>(xs: List<T>, out: [T], i: Int): Int {
+    return match (xs) {
+        List::Nil => i,
+        List::Cons(head, tail) => fill_array(tail, array_set(out, i, head), i + 1),
+    };
+}
+
+// Converts a persistent list into the array literal type the Html builders
+// expect. This is the single point where the functional half of the program
+// meets the array-shaped virtual DOM API.
+export function list_to_array<T>(xs: List<T>): [T] {
+    let out: [T] = [];
+    fill_array(xs, out, 0);
+    return out;
+}
+
+// ---------------------------------------------------------
+// Numbers and formatting
+// ---------------------------------------------------------
+
+// Left pads a number below ten with a zero, for clock readouts.
+export function pad2(n: Int): String {
+    return if (n < 10) "0" + toString(n) else toString(n);
+}
+
+// Renders a number of seconds as mm:ss.
+//
+// Division is not truncating on its own, so the quotient is put through an
+// explicit `as Int` cast, which lowers to a truncation towards zero.
+export function format_clock(total: Int): String {
+    let minutes = (total / 60) as Int;
+    let seconds = total % 60;
+    return pad2(minutes) + ":" + pad2(seconds);
+}
+
+// Percentage of part out of whole, guarding against an empty board.
+//
+// Int and Float are separate types with no implicit coercion between them, so
+// both operands are cast before the division and the literals below are
+// written as Floats.
+export function percent(part: Int, whole: Int): Float {
+    return if (whole == 0)
+        0.0
+    else
+        (part as Float) / (whole as Float) * 100.0;
+}
+
+// Rate per minute, used for the completed-tasks-per-minute readout.
+export function per_minute(count: Int, seconds: Int): Float {
+    return if (seconds == 0)
+        0.0
+    else
+        (count as Float) / ((seconds as Float) / 60.0);
+}
+
+// Rounds a Float to one decimal place and renders it as a String.
+//
+// There is no string formatting library yet, so the rounding is done by hand:
+// scale up, round half away from zero with the `+ 0.5`, truncate, then split
+// the integer part from the single remaining digit.
+export function format_decimal(value: Float): String {
+    let scaled = (value * 10.0 + 0.5) as Int;
+    let whole = (scaled / 10) as Int;
+    let tenth = scaled % 10;
+    return toString(whole) + "." + toString(tenth);
+}
+
+// ---------------------------------------------------------
+// CSS class helpers
+// ---------------------------------------------------------
+//
+// The runtime treats a Class attribute as the element's entire class list, so
+// a node gets exactly one Class attribute and any conditional parts are
+// composed into that single string first.
+
+// Appends extra to base only when the condition holds.
+export function class_when(base: String, extra: String, on: Bool): String {
+    return if (on) base + " " + extra else base;
+}

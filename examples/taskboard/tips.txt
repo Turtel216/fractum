@@ -1,0 +1,11 @@
+Working with the task board
+
+  Press n to jump to the composer, then Enter to add what you typed.
+  Press r to have the runtime pick a task for you at random.
+  Press t to start or pause the session clock.
+  Press 1, 2 or 3 to switch between All, Active and Done.
+  Press Esc to clear the notice and the current pick.
+
+This text was fetched with Cmd::HttpGet. The response arrives back in the
+update loop as Result<String, String>, so the panel you are reading it in
+had to handle the failure case before it could render this one.

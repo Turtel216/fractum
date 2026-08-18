@@ -1,0 +1,21 @@
+// Float literals and arithmetic, kept entirely within Float.
+let pi = 3.5;
+let radius = 2.0;
+let area = pi * radius * radius;
+print(area);
+
+// Mutable Float binding.
+let mut total = 0.5;
+total = total + 1.25;
+print(total);
+
+// Unary negation on a Float.
+print(-pi);
+
+// Float comparisons.
+print(pi < 4.0);
+print(pi > 4.0);
+
+// Float typed via annotation.
+let e: Float = 2.71;
+print(e);

@@ -1,0 +1,488 @@
+// ==========================================
+// View.fr
+// The presentation layer: model in, virtual DOM out
+// ==========================================
+//
+// Every function in this file is pure. None of them touch the document, hold a
+// reference to an element, or fire an effect: they build a Html<Msg> tree and
+// hand it back. The runtime diffs the tree against the previous one and patches
+// the real DOM, so the only thing this module has to get right is what the page
+// should look like for a given model.
+
+import {
+    List,
+    Pair,
+    list_map,
+    list_zip,
+    list_range,
+    list_length,
+    list_is_empty,
+    option_and_then
+} from "../../stdlib/Functional";
+import { Option } from "../../stdlib/Option";
+import {
+    Attribute,
+    Html,
+    KeyedItem,
+    div,
+    span,
+    p,
+    h1,
+    button,
+    li,
+    form,
+    header,
+    footer,
+    section,
+    input,
+    text
+} from "../../stdlib/Html";
+import {
+    Task,
+    Priority,
+    Filter,
+    priority_name,
+    priority_class,
+    filter_is,
+    filter_name,
+    filter_empty_message,
+    visible_tasks,
+    count_done,
+    count_active,
+    completion,
+    remaining_effort,
+    task_at
+} from "./Task";
+import { Model, Msg, Theme, Notice, Sync, draft_input_id } from "./Model";
+import { list_to_array, format_clock, format_decimal, per_minute, class_when } from "./Util";
+
+// ---------------------------------------------------------
+// Small shared pieces
+// ---------------------------------------------------------
+
+// One labelled number in the statistics strip.
+function view_stat(name: String, value: String): Html<Msg> {
+    return div([Attribute::Class("stat")], [
+        span([Attribute::Class("stat-value")], [text(value)]),
+        span([Attribute::Class("stat-name")], [text(name)]),
+    ]);
+}
+
+function view_banner(css: String, message: String): Html<Msg> {
+    return div([Attribute::Class(css)], [
+        span([], [text(message)]),
+        button(
+            [Attribute::Class("banner-close"), Attribute::OnClick(Msg::NoticeDismissed)],
+            [text("Dismiss")]
+        ),
+    ]);
+}
+
+// ---------------------------------------------------------
+// Header
+// ---------------------------------------------------------
+
+function width_note(width: Int): String {
+    return if (width < 720)
+        "compact"
+    else if (width < 1100)
+        "medium"
+    else
+        "wide";
+}
+
+// The width is an Option because nothing has measured the window yet when the
+// first render happens: the value only arrives once the resize subscription
+// fires. Option makes that gap a case to handle rather than a zero to explain.
+function viewport_note(width: Option<Int>): String {
+    return match (width) {
+        Option::None => "resize the window to measure it",
+        Option::Some(w) => toString(w) + "px, " + width_note(w),
+    };
+}
+
+function timer_button_name(running: Bool): String {
+    return if (running) "Pause" else "Start";
+}
+
+function theme_button_name(theme: Theme): String {
+    return match (theme) {
+        Theme::Dark => "Light mode",
+        Theme::Light => "Dark mode",
+    };
+}
+
+// The theme is a value in the model, so switching it is nothing more than
+// rendering a different class name on the root element.
+function theme_class(theme: Theme): String {
+    return match (theme) {
+        Theme::Dark => "board theme-dark",
+        Theme::Light => "board theme-light",
+    };
+}
+
+function view_header(model: Model): Html<Msg> {
+    return header([Attribute::Class("board-header")], [
+        div([Attribute::Class("titles")], [
+            h1([], [text("Fractum Task Board")]),
+            p([Attribute::Class("subtitle")], [
+                text("A statically typed front end with no hand written JavaScript."),
+            ]),
+        ]),
+        div([Attribute::Class("tools")], [
+            span([Attribute::Class("clock")], [text(format_clock(model.timer.seconds))]),
+            button(
+                [Attribute::Class("ghost"), Attribute::OnClick(Msg::TimerToggled)],
+                [text(timer_button_name(model.timer.running))]
+            ),
+            button(
+                [Attribute::Class("ghost"), Attribute::OnClick(Msg::TimerReset)],
+                [text("Reset")]
+            ),
+            button(
+                [Attribute::Class("ghost"), Attribute::OnClick(Msg::ThemeToggled)],
+                [text(theme_button_name(model.ui.theme))]
+            ),
+            span([Attribute::Class("viewport")], [text(viewport_note(model.ui.width))]),
+        ]),
+    ]);
+}
+
+// ---------------------------------------------------------
+// Composer
+// ---------------------------------------------------------
+
+function view_priority_option(level: Priority): Html<Msg> {
+    return Html::Node(
+        "option",
+        [Attribute::Value(priority_name(level))],
+        [text(priority_name(level))]
+    );
+}
+
+// The form, the text field and the select between them exercise most of the
+// event surface: OnSubmit, OnInput, OnKeyDown, OnFocus, OnBlur and OnChange.
+// Every one of them is sanitised by the runtime before it reaches this program:
+// a handler receives a String or an Int, never a raw DOM event.
+function view_composer(model: Model): Html<Msg> {
+    return form([Attribute::Class("composer"), Attribute::OnSubmit(Msg::DraftSubmitted)], [
+        input([
+            Attribute::Id(draft_input_id),
+            Attribute::Class("draft-input"),
+            Attribute::Type("text"),
+            Attribute::Placeholder("What needs doing?"),
+            Attribute::Value(model.draft.text),
+            Attribute::OnInput((entered) => Msg::DraftChanged(entered)),
+            Attribute::OnKeyDown((code) => Msg::DraftKeyPressed(code)),
+            Attribute::OnFocus(Msg::DraftFocused),
+            Attribute::OnBlur(Msg::DraftBlurred),
+        ]),
+        // There is no select builder in the standard library, so the node is
+        // built straight from the Html constructor the builders themselves use.
+        Html::Node(
+            "select",
+            [
+                Attribute::Class("priority-select"),
+                Attribute::Value(priority_name(model.draft.priority)),
+                Attribute::OnChange((chosen) => Msg::DraftPriorityChanged(chosen)),
+            ],
+            [
+                view_priority_option(Priority::Low),
+                view_priority_option(Priority::Medium),
+                view_priority_option(Priority::High),
+            ]
+        ),
+        button(
+            [
+                Attribute::Class("primary"),
+                Attribute::Type("submit"),
+                Attribute::Disabled(model.draft.text == ""),
+            ],
+            [text("Add task")]
+        ),
+    ]);
+}
+
+// ---------------------------------------------------------
+// Notices
+// ---------------------------------------------------------
+
+function view_notice(notice: Option<Notice>): Html<Msg> {
+    return match (notice) {
+        // Html::Empty is the virtual DOM stand in for rendering nothing.
+        Option::None => Html::Empty,
+        Option::Some(current) => match (current) {
+            Notice::Info(message) => view_banner("banner banner-info", message),
+            Notice::Problem(message) => view_banner("banner banner-problem", message),
+        },
+    };
+}
+
+// ---------------------------------------------------------
+// Statistics
+// ---------------------------------------------------------
+
+function view_stats(model: Model): Html<Msg> {
+    let tasks = model.board.tasks;
+    let finished = count_done(tasks);
+    let progress = completion(tasks);
+    return section([Attribute::Class("stats")], [
+        div([Attribute::Class("progress")], [
+            // The bar is sized by an inline style built from a Float, which is
+            // the one place in the program where a number reaches the DOM as
+            // something other than text.
+            div(
+                [
+                    Attribute::Class("progress-fill"),
+                    Attribute::Style("width", format_decimal(progress) + "%"),
+                ],
+                []
+            ),
+        ]),
+        div([Attribute::Class("stat-row")], [
+            view_stat("total", toString(list_length(tasks))),
+            view_stat("active", toString(count_active(tasks))),
+            view_stat("done", toString(finished)),
+            view_stat("complete", format_decimal(progress) + "%"),
+            view_stat("effort left", toString(remaining_effort(tasks))),
+            view_stat("per minute", format_decimal(per_minute(finished, model.timer.seconds))),
+        ]),
+    ]);
+}
+
+// ---------------------------------------------------------
+// Toolbar
+// ---------------------------------------------------------
+
+function view_filter_tab(current: Filter, tab: Filter): Html<Msg> {
+    return button(
+        [
+            Attribute::Class(class_when("tab", "is-active", filter_is(current, tab))),
+            Attribute::OnClick(Msg::FilterSelected(tab)),
+        ],
+        [text(filter_name(tab))]
+    );
+}
+
+function view_toolbar(model: Model): Html<Msg> {
+    return div([Attribute::Class("toolbar")], [
+        div([Attribute::Class("tabs")], [
+            view_filter_tab(model.board.filter, Filter::All),
+            view_filter_tab(model.board.filter, Filter::Active),
+            view_filter_tab(model.board.filter, Filter::Done),
+        ]),
+        div([Attribute::Class("toolbar-actions")], [
+            button(
+                [Attribute::Class("ghost"), Attribute::OnClick(Msg::SpotlightRequested)],
+                [text("Pick one at random")]
+            ),
+            button(
+                [
+                    Attribute::Class("ghost"),
+                    Attribute::Disabled(count_done(model.board.tasks) == 0),
+                    Attribute::OnClick(Msg::DoneCleared),
+                ],
+                [text("Clear finished")]
+            ),
+        ]),
+    ]);
+}
+
+// ---------------------------------------------------------
+// The task list
+// ---------------------------------------------------------
+
+function spotlight_task(model: Model): Option<Task> {
+    // The random command hands back an index, which only becomes a task once
+    // it is looked up. option_and_then threads the lookup through without any
+    // intermediate null check.
+    return option_and_then(model.board.spotlight, (index) => task_at(model.board.tasks, index));
+}
+
+function same_task(candidate: Option<Task>, task: Task): Bool {
+    return match (candidate) {
+        Option::None => false,
+        Option::Some(other) => other.id == task.id,
+    };
+}
+
+function is_hovered(model: Model, task: Task): Bool {
+    return match (model.ui.hovered) {
+        Option::None => false,
+        Option::Some(id) => id == task.id,
+    };
+}
+
+function row_class(model: Model, task: Task): String {
+    let with_done = class_when("task-row", "is-done", task.done);
+    let with_hover = class_when(with_done, "is-hovered", is_hovered(model, task));
+    return class_when(with_hover, "is-spotlit", same_task(spotlight_task(model), task));
+}
+
+function view_task_row(model: Model, index: Int, total: Int, task: Task): Html<Msg> {
+    return li(
+        [
+            Attribute::Class(row_class(model, task)),
+            Attribute::OnMouseEnter(Msg::TaskHovered(task.id)),
+            Attribute::OnMouseLeave(Msg::TaskUnhovered),
+        ],
+        [
+            span(
+                [
+                    Attribute::Class(class_when("check", "is-checked", task.done)),
+                    Attribute::OnClick(Msg::TaskToggled(task.id)),
+                ],
+                []
+            ),
+            span([Attribute::Class("task-title")], [text(task.title)]),
+            // The badge doubles as a control: clicking it cycles the priority.
+            button(
+                [
+                    Attribute::Class(priority_class(task.priority)),
+                    Attribute::OnClick(Msg::TaskPriorityCycled(task.id)),
+                ],
+                [text(priority_name(task.priority))]
+            ),
+            div([Attribute::Class("row-actions")], [
+                button(
+                    [
+                        Attribute::Class("ghost small"),
+                        Attribute::Disabled(index == 0),
+                        Attribute::OnClick(Msg::TaskMovedUp(task.id)),
+                    ],
+                    [text("Up")]
+                ),
+                button(
+                    [
+                        Attribute::Class("ghost small"),
+                        Attribute::Disabled(index == total - 1),
+                        Attribute::OnClick(Msg::TaskMovedDown(task.id)),
+                    ],
+                    [text("Down")]
+                ),
+                button(
+                    [
+                        Attribute::Class("ghost small danger"),
+                        Attribute::OnClick(Msg::TaskDeleted(task.id)),
+                    ],
+                    [text("Delete")]
+                ),
+            ]),
+        ]
+    );
+}
+
+// Pairing each row with its own key is what lets the runtime move existing DOM
+// nodes when the order changes, instead of tearing the rows down and building
+// them again.
+function view_task_item(model: Model, index: Int, total: Int, task: Task): KeyedItem<Msg> {
+    return { key: toString(task.id), child: view_task_row(model, index, total, task) };
+}
+
+// list_zip against a range is how a row learns its own position, which is what
+// the Up and Down buttons need in order to disable themselves at the ends.
+function view_task_items(model: Model, visible: List<Task>): [KeyedItem<Msg>] {
+    let total = list_length(visible);
+    let indexed = list_zip(list_range(0, total), visible);
+    return list_to_array(
+        list_map(indexed, (entry: Pair<Int, Task>) =>
+            view_task_item(model, entry.first, total, entry.second))
+    );
+}
+
+function view_tasks(model: Model): Html<Msg> {
+    let visible = visible_tasks(model.board.tasks, model.board.filter);
+    return if (list_is_empty(visible))
+        div([Attribute::Class("empty")], [text(filter_empty_message(model.board.filter))])
+    else
+        Html::Keyed("ul", [Attribute::Class("tasks")], view_task_items(model, visible));
+}
+
+// ---------------------------------------------------------
+// Spotlight and tips
+// ---------------------------------------------------------
+
+function view_spotlight(model: Model): Html<Msg> {
+    return match (spotlight_task(model)) {
+        Option::None => Html::Empty,
+        Option::Some(task) => div([Attribute::Class("spotlight")], [
+            span([Attribute::Class("spotlight-label")], [text("Picked for you")]),
+            span([Attribute::Class("spotlight-title")], [text(task.title)]),
+            span([Attribute::Class(priority_class(task.priority))], [text(priority_name(task.priority))]),
+            button(
+                [Attribute::Class("ghost small"), Attribute::OnClick(Msg::SpotlightCleared)],
+                [text("Clear")]
+            ),
+        ]),
+    };
+}
+
+// Each state of the request gets its own branch, so a spinner can never be left
+// on screen next to a result and an error can never be mistaken for a body.
+function view_tips(tips: Sync): Html<Msg> {
+    return section([Attribute::Class("tips")], match (tips) {
+        Sync::Idle => [
+            span([Attribute::Class("muted")], [text("Tips are fetched over HTTP on demand.")]),
+            button(
+                [Attribute::Class("ghost small"), Attribute::OnClick(Msg::TipsRequested)],
+                [text("Load tips")]
+            ),
+        ],
+        Sync::Loading => [span([Attribute::Class("muted")], [text("Loading tips...")])],
+        Sync::Loaded(body) => [
+            Html::Node("pre", [Attribute::Class("tips-body")], [text(body)]),
+            button(
+                [Attribute::Class("ghost small"), Attribute::OnClick(Msg::TipsRequested)],
+                [text("Reload")]
+            ),
+        ],
+        Sync::Failed(problem) => [
+            span([Attribute::Class("tips-error")], [text("Request failed: " + problem)]),
+            button(
+                [Attribute::Class("ghost small"), Attribute::OnClick(Msg::TipsRequested)],
+                [text("Try again")]
+            ),
+        ],
+    });
+}
+
+// ---------------------------------------------------------
+// Footer
+// ---------------------------------------------------------
+
+function view_hint(keys: String, meaning: String): Html<Msg> {
+    return span([Attribute::Class("hint")], [
+        span([Attribute::Class("key")], [text(keys)]),
+        text(meaning),
+    ]);
+}
+
+function view_footer(): Html<Msg> {
+    return footer([Attribute::Class("board-footer")], [
+        view_hint("n", "focus the composer"),
+        view_hint("r", "pick a task at random"),
+        view_hint("t", "start or pause the clock"),
+        view_hint("1 2 3", "switch filter"),
+        view_hint("esc", "clear the notice and the pick"),
+    ]);
+}
+
+// ---------------------------------------------------------
+// Root
+// ---------------------------------------------------------
+
+// The whole page as one expression. Reading top to bottom gives the layout of
+// the document, and each piece can be understood without the others.
+export function view(model: Model): Html<Msg> {
+    return div([Attribute::Class(theme_class(model.ui.theme))], [
+        view_header(model),
+        view_composer(model),
+        view_notice(model.ui.notice),
+        view_stats(model),
+        view_toolbar(model),
+        view_spotlight(model),
+        view_tasks(model),
+        view_tips(model.ui.tips),
+        view_footer(),
+    ]);
+}
