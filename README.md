@@ -293,6 +293,7 @@ five-module task board that exercises the rest of the surface, including keyed
 list reordering, every sanitized event handler, commands for storage, timers,
 randomness and HTTP, and subscriptions that start and stop with the model.
 -->
+
 ## Diagnostics and Error Reporting
 
 Fractum features a detailed diagnostic engine. Below is a catalog of currently implemented error codes:
@@ -317,20 +318,3 @@ Fractum features a detailed diagnostic engine. Below is a catalog of currently i
 | E0016 | Circular import      | modules form a cycle: `a.fr -> b.fr -> a.fr`         |
 | E0017 | Invalid cast         | cannot cast `Bool` to `Int` -- only conversions between `Int` and `Float` are supported |
 | E0099 | Internal / General   | raw message                                            |
-
-## Roadmap and Current Limitations
-
-**Currently Supported:**
-*   Parser (Megaparsec) and Typed AST
-*   HM-style type inference and checking
-*   Precedence-aware JavaScript pretty-printer
-*   Immutability by default and mutation checks
-*   Polymorphic functions and type aliases
-*   Algebraic data types (ADTs) and pattern matching
-*   Module and import system (bundled to a single JavaScript output)
-*   DOM manipulation via the Elm Architecture (`stdlib/Html.fr`, `stdlib/Cmd.fr`, `stdlib/Sub.fr`) backed by a virtual DOM runtime
-
-**Future Enhancements:**
-*   Optimization pipeline
-*   Flexible object typing while preserving static structural safety.
-*   Language Server Protocol (LSP) integration and a dedicated code formatter.
