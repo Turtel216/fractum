@@ -1,0 +1,6 @@
+error[E0016]: circular import
+ --> test/e2e/ui/018-circular-import/b.fr:1:1
+  |
+1 | import { a } from "./a";
+  | ^^^^^^^^^^^^^^^^^^^^^^^^ modules form a cycle: test/e2e/ui/018-circular-import/a.fr -> test/e2e/ui/018-circular-import/b.fr -> test/e2e/ui/018-circular-import/a.fr
+  |

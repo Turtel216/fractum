@@ -18,7 +18,7 @@ import Test.Tasty.HUnit (assertFailure, testCase)
 main :: IO ()
 main = do
   passTests <- discoverDirTests mkPassTestCase "test/e2e/pass"
-  failTests <- discoverDirTests mkFailTestCase "test/e2e/fail"
+  uiTests <- discoverDirTests mkUiTestCase "test/e2e/ui"
   stdlibTests <- discoverCompileTests "stdlib"
   exampleTests <- discoverCompileTests "examples"
 
@@ -26,7 +26,7 @@ main = do
     testGroup
       "Compiler E2E Tests"
       [ testGroup "Pass Cases" passTests,
-        testGroup "Fail Cases" failTests,
+        testGroup "UI Cases" uiTests,
         testGroup "Stdlib Compiles" stdlibTests,
         testGroup "Examples Compile" exampleTests
       ]
@@ -63,7 +63,7 @@ toGolden :: T.Text -> BL.ByteString
 toGolden = BL.fromStrict . TE.encodeUtf8
 
 --------------------------------------------------------------------------------
--- Pass / Fail suites: one test directory per case, each holding "input.fr"
+-- Pass / UI suites: one test directory per case, each holding "input.fr"
 -- plus golden files with the expected output.
 --------------------------------------------------------------------------------
 
@@ -103,9 +103,9 @@ mkPassTestCase dir = do
           return (stdout <> stderr)
       ]
 
--- | Constructs the golden test for a single test directory in fail/
-mkFailTestCase :: FilePath -> IO TestTree
-mkFailTestCase dir = do
+-- | Constructs the golden test for a single test directory in ui/
+mkUiTestCase :: FilePath -> IO TestTree
+mkUiTestCase dir = do
   let testName = takeFileName dir
       inputFile = dir </> "input.fr"
       expectedErrFile = dir </> "expected.stderr"
